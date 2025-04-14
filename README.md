@@ -1,4 +1,10 @@
 # Apophysis 7X
+
+### A new Pythonic Beginning
+I'm embarking on a fun (and perhaps foolish) rewrite of the Apophysis codebase into modern python.
+
+==============OLD STUFF================
+
 Apophysis was written with Delphi 5.0 and is now developed using Delphi XE2
 
 The rendering engine (with some modifications) comes from a screensaver by Ronald Hordijk: http://home.kabelfoon.nl/~rhordijk/progs.html#flame
