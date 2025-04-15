@@ -1,7 +1,12 @@
-# Apophysis 7X
+# Apophysis 25
 
 ### A new Pythonic Beginning
 I'm embarking on a fun (and perhaps foolish) rewrite of the Apophysis codebase into modern python.
+
+### Ideas
+- include a backend cli interface that will allow for remote rendering and access
+- plugins modification on the fly (similar to Ultrafractal)
+
 
 ==============OLD STUFF================
 
