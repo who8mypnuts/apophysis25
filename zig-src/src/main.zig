@@ -25,6 +25,23 @@ fn toWorld(sx: f32, sy: f32, zoom: f32, width: f32, height: f32) rl.Vector2 {
     };
 }
 
+fn rlToFlameColor(c: rl.Color) colors.Color {
+    return .{
+        .r = @as(f32, @floatFromInt(c.r)) / 255.0,
+        .g = @as(f32, @floatFromInt(c.g)) / 255.0,
+        .b = @as(f32, @floatFromInt(c.b)) / 255.0,
+    };
+}
+
+fn flameToRlColor(c: colors.Color) rl.Color {
+    return rl.Color.init(
+        @as(u8, @intFromFloat(@max(0.0, @min(1.0, c.r)) * 255.0)),
+        @as(u8, @intFromFloat(@max(0.0, @min(1.0, c.g)) * 255.0)),
+        @as(u8, @intFromFloat(@max(0.0, @min(1.0, c.b)) * 255.0)),
+        255,
+    );
+}
+
 pub fn drawFloatControl(
     bounds: rl.Rectangle,
     text: [:0]const u8,
@@ -109,8 +126,11 @@ pub fn main() anyerror!void {
     // var show_about_box: bool = false; // Future use?
 
     // Editor Tab State
-    var active_tab: enum { Fractal, Transform } = .Fractal;
+    var active_tab: enum { Fractal, Transform, Color } = .Fractal;
     var xform_dropdown_edit_mode: bool = false;
+    var selected_color_node: i32 = 0;
+    var picker_color_rl: rl.Color = rl.Color.white;
+    var last_color_node_idx: i32 = -1;
     
     // Triangle Editor State
     var drag_mode: enum { None, DragO, DragX, DragY, DragScale } = .None;
@@ -465,6 +485,7 @@ pub fn main() anyerror!void {
 
         // Draw GUI Panel
         const guiWidth = screenWidth - renderWidth;
+        rg.unlock(); // Fail-safe to ensure switcher is never stuck locked
         _ = rg.panel(rl.Rectangle.init(@floatFromInt(renderWidth), 0, @floatFromInt(guiWidth), @floatFromInt(screenHeight)), "Editor");
         
         // Vertical tabs on left side
@@ -478,6 +499,7 @@ pub fn main() anyerror!void {
         const fractal_text = if (fractal_active) "#Fractal#" else "Fractal";
         if (rg.button(rl.Rectangle.init(panelX + 5, tabY, tabWidth, tabHeight), fractal_text)) {
             active_tab = .Fractal;
+            xform_dropdown_edit_mode = false;
         }
         tabY += tabHeight + 5;
         
@@ -486,6 +508,16 @@ pub fn main() anyerror!void {
         const transform_text = if (transform_active) "#Transform#" else "Transform";
         if (rg.button(rl.Rectangle.init(panelX + 5, tabY, tabWidth, tabHeight), transform_text)) {
             active_tab = .Transform;
+            xform_dropdown_edit_mode = false;
+        }
+        
+        // Color tab
+        tabY += tabHeight + 5;
+        const color_active = (active_tab == .Color);
+        const color_text = if (color_active) "#Color#" else "Color";
+        if (rg.button(rl.Rectangle.init(panelX + 5, tabY, tabWidth, tabHeight), color_text)) {
+            active_tab = .Color;
+            xform_dropdown_edit_mode = false;
         }
         
         // Content area (to the right of tabs)
@@ -617,6 +649,106 @@ pub fn main() anyerror!void {
                 rg.unlock();
                 if (rg.dropdownBox(dropdown_rect, list_sentinel, &selected_xform, xform_dropdown_edit_mode) > 0) {
                     xform_dropdown_edit_mode = !xform_dropdown_edit_mode;
+                }
+            },
+            .Color => {
+                _ = rg.label(rl.Rectangle.init(contentX, cy, 100, 20), "Color Palette");
+                cy += 30;
+
+                // Gradient rectangle
+                const gradWidth: f32 = 256.0;
+                const gradRect = rl.Rectangle.init(contentX, cy, gradWidth, 40);
+                
+                // Draw baked colors
+                for (0..256) |i| {
+                    const c = flameToRlColor(f.palette.colors[i]);
+                    rl.drawRectangle(@intFromFloat(contentX + @as(f32, @floatFromInt(i))), @intFromFloat(cy), 1, 40, c);
+                }
+                rl.drawRectangleLinesEx(gradRect, 1, rl.Color.gray);
+                cy += 50;
+
+                // Draw node markers
+                const markerY = cy;
+                for (0..f.palette.num_nodes) |i| {
+                    const node = f.palette.nodes[i];
+                    const nx = contentX + node.pos * (gradWidth - 1.0);
+                    const is_sel = (@as(i32, @intCast(i)) == selected_color_node);
+                    const marker_color = if (is_sel) rl.Color.white else rl.Color.gray;
+                    
+                    // Marker (Triangle)
+                    rl.drawTriangle(
+                        rl.Vector2.init(nx, markerY),
+                        rl.Vector2.init(nx - 6, markerY + 12),
+                        rl.Vector2.init(nx + 6, markerY + 12),
+                        marker_color
+                    );
+                    
+                    // Click to select
+                    if (rl.isMouseButtonPressed(rl.MouseButton.left)) {
+                        const m = rl.getMousePosition();
+                        if (m.x >= nx - 8 and m.x <= nx + 8 and m.y >= markerY and m.y <= markerY + 15) {
+                            selected_color_node = @intCast(i);
+                        }
+                    }
+                }
+                cy += 20;
+
+                // Node controls
+                if (f.palette.num_nodes > 0) {
+                    const idx = @as(usize, @intCast(@max(0, @min(f.palette.num_nodes - 1, @as(u32, @intCast(selected_color_node))))));
+                    var node = &f.palette.nodes[idx];
+                    
+                    // Persistent sync: if selection changed, update picker
+                    if (selected_color_node != last_color_node_idx) {
+                        picker_color_rl = flameToRlColor(node.color);
+                        last_color_node_idx = selected_color_node;
+                    }
+
+                    _ = rg.label(rl.Rectangle.init(contentX, cy, 50, 20), "Pos");
+                    if (rg.slider(rl.Rectangle.init(contentX + 40, cy, 210, 20), "", "", &node.pos, 0.0, 1.0) != 0) {
+                        f.palette.bake();
+                        render_state.upload_palette(f.palette.colors[0..]);
+                    }
+                    cy += 30;
+
+                    if (rg.colorPicker(rl.Rectangle.init(contentX, cy, 200, 200), "", &picker_color_rl) != 0) {
+                        node.color = rlToFlameColor(picker_color_rl);
+                        node.color.a = 1.0; 
+                        f.palette.bake();
+                        render_state.upload_palette(f.palette.colors[0..]);
+                    }
+                    cy += 210;
+                }
+
+                // Add/Delete Node
+                if (f.palette.num_nodes < 16) {
+                    if (rg.button(rl.Rectangle.init(contentX, cy, 100, 30), "Add Node")) {
+                        const new_idx = f.palette.num_nodes;
+                        f.palette.nodes[new_idx] = colors.ColorNode{ 
+                            .pos = 0.5, 
+                            .color = colors.Color{ .r = 1, .g = 1, .b = 1 } 
+                        };
+                        f.palette.num_nodes += 1;
+                        f.palette.bake();
+                        selected_color_node = @intCast(new_idx);
+                        render_state.upload_palette(f.palette.colors[0..]);
+                        render_state.reset_histogram();
+                        history.push(f) catch {};
+                    }
+                }
+                if (f.palette.num_nodes > 1) {
+                    if (rg.button(rl.Rectangle.init(contentX + 110, cy, 110, 30), "Delete Node")) {
+                        const del_idx = @as(usize, @intCast(selected_color_node));
+                        for (del_idx..f.palette.num_nodes - 1) |i| {
+                            f.palette.nodes[i] = f.palette.nodes[i+1];
+                        }
+                        f.palette.num_nodes -= 1;
+                        selected_color_node = @max(0, selected_color_node - 1);
+                        f.palette.bake();
+                        render_state.upload_palette(f.palette.colors[0..]);
+                        render_state.reset_histogram();
+                        history.push(f) catch {};
+                    }
                 }
             },
         }

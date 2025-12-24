@@ -10,6 +10,10 @@ layout(std430, binding = 2) buffer HistogramBuffer {
     Hist histogram[];
 };
 
+layout(std430, binding = 3) buffer PaletteBuffer {
+    vec4 palette[256];
+};
+
 layout(rgba8, binding = 0) uniform image2D outTex;
 
 uniform float uGamma;
@@ -30,8 +34,10 @@ void main() {
         return;
     }
 
-    // Average color
-    vec3 color = vec3(h.r, h.g, h.b) / h.c;
+    // Average color index [0, 1]
+    float avgC = h.r / h.c; // 'r' stores sum_c
+    int palIdx = int(clamp(avgC, 0.0, 1.0) * 255.0);
+    vec3 color = palette[palIdx].rgb;
     
     // Density estimation (log scale)
     float logHits = log(1.0 + h.c) / log(10.0);

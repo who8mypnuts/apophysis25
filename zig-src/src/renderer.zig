@@ -348,6 +348,7 @@ pub const RenderState = struct {
             // Run BLIT Compute Shader: SSBO -> Texture
             rl.gl.rlEnableShader(self.blit_shader);
             rl.gl.rlBindShaderBuffer(self.histogram_buffer_id, 2);
+            rl.gl.rlBindShaderBuffer(self.palette_buffer_id, 3);
             // Bind Texture as Image for writing. (uncompressed_r8g8b8a8 = 7)
             rl.gl.rlBindImageTexture(self.gpu_histogram_tex.id, 0, 7, false);
             

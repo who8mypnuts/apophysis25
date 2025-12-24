@@ -132,18 +132,13 @@ void main() {
         int sx = int(p.x * uScale + cx);
         int sy = int(p.y * uScale + cy);
 
-        if (sx >= 0 && sx < uWidth && sy >= 0 && sy < uHeight) {
-            uint h_idx = uint(sy * uWidth + sx);
-            
-            int palIdx = int(p.c * 255.0);
-            palIdx = clamp(palIdx, 0, 255);
-            vec4 palColor = palette[palIdx];
-
-            atomicAdd(histogram[h_idx].r, palColor.r);
-            atomicAdd(histogram[h_idx].g, palColor.g);
-            atomicAdd(histogram[h_idx].b, palColor.b);
-            atomicAdd(histogram[h_idx].c, 1.0);
-        }
+            if (sx >= 0 && sx < uWidth && sy >= 0 && sy < uHeight) {
+                uint h_idx = uint(sy * uWidth + sx);
+                
+                // Store accumulated color index and hit count
+                atomicAdd(histogram[h_idx].r, p.c); // Use 'r' as sum_c
+                atomicAdd(histogram[h_idx].c, 1.0); // Use 'c' as hits
+            }
     }
 
     // Safety: prevent NaNs from ruining the PointBuffer

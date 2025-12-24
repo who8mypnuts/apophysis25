@@ -4,6 +4,7 @@ pub const Color = struct {
     r: f32,
     g: f32,
     b: f32,
+    a: f32 = 1.0,
 
     pub fn scale(self: Color, scalar: f32) Color {
         return Color{
@@ -30,36 +31,80 @@ pub const Color = struct {
     }
 };
 
+pub const ColorNode = struct {
+    pos: f32, // 0.0 - 1.0
+    color: Color,
+};
+
 pub const Palette = struct {
     colors: [256]Color,
+    nodes: [16]ColorNode,
+    num_nodes: u8,
 
     pub fn initDefault() Palette {
-        var p = Palette{ .colors = undefined };
-        // Simple rainbow gradient
-        for (0..256) |i| {
-            const t = @as(f32, @floatFromInt(i)) / 255.0;
-            p.colors[i] = Color{
-                .r = 0.5 + 0.5 * std.math.sin(std.math.pi * 2.0 * t),
-                .g = 0.5 + 0.5 * std.math.sin(std.math.pi * 2.0 * t + 2.0),
-                .b = 0.5 + 0.5 * std.math.sin(std.math.pi * 2.0 * t + 4.0),
-            };
-        }
+        var p = Palette{ 
+            .colors = undefined,
+            .nodes = undefined,
+            .num_nodes = 3,
+        };
+        
+        p.nodes[0] = ColorNode{ .pos = 0.0, .color = Color{ .r = 1, .g = 0, .b = 0 } };
+        p.nodes[1] = ColorNode{ .pos = 0.5, .color = Color{ .r = 0, .g = 1, .b = 0 } };
+        p.nodes[2] = ColorNode{ .pos = 1.0, .color = Color{ .r = 0, .g = 0, .b = 1 } };
+        
+        p.bake();
         return p;
     }
 
+    pub fn bake(self: *Palette) void {
+        if (self.num_nodes == 0) return;
+        
+        // Sort nodes by position (simple bubble sort for now, small n)
+        for (0..self.num_nodes) |i| {
+            for (i+1..self.num_nodes) |j| {
+                if (self.nodes[i].pos > self.nodes[j].pos) {
+                    const tmp = self.nodes[i];
+                    self.nodes[i] = self.nodes[j];
+                    self.nodes[j] = tmp;
+                }
+            }
+        }
+
+        for (0..256) |i| {
+            const t = @as(f32, @floatFromInt(i)) / 255.0;
+            
+            // Find segment
+            var found = false;
+            if (t <= self.nodes[0].pos) {
+                self.colors[i] = self.nodes[0].color;
+                found = true;
+            } else if (t >= self.nodes[self.num_nodes - 1].pos) {
+                self.colors[i] = self.nodes[self.num_nodes - 1].color;
+                found = true;
+            } else {
+                for (0..self.num_nodes - 1) |n| {
+                    const n1 = self.nodes[n];
+                    const n2 = self.nodes[n+1];
+                    if (t >= n1.pos and t <= n2.pos) {
+                        const local_t = (t - n1.pos) / (n2.pos - n1.pos);
+                        self.colors[i] = Color.lerp(n1.color, n2.color, local_t);
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            if (!found) self.colors[i] = self.nodes[0].color;
+        }
+    }
+
     pub fn getColor(self: Palette, index: f32) Color {
-        // Index is 0.0 - 1.0 (usually)
-        // Wrap it
         var idx = index;
         idx = idx - @floor(idx);
-        
         const pos = idx * 255.0;
         const i = @as(usize, @intFromFloat(pos));
         const t = pos - @floor(pos);
-        
         const c1 = self.colors[i % 256];
         const c2 = self.colors[(i + 1) % 256];
-        
         return Color.lerp(c1, c2, t);
     }
 };
