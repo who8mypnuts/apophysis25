@@ -1,0 +1,4 @@
+<flame name="Test" gamma="2.5" brightness="3.0" >
+   <xform weight="0.8" color="0.5" coefs="1 0 0 1 0 0" linear="1" />
+   <xform weight="0.2" color="0.1" coefs="0.5 0 0 0.5 0.5 0.5" julia="1.5" />
+</flame>

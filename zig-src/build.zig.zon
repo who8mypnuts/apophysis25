@@ -1,0 +1,16 @@
+.{
+    .name = .zig_src,
+    .version = "0.0.0",
+    .fingerprint = 0xddf647bfff744535,
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{
+        .@"raylib-zig" = .{
+            .path = "deps/raylib-zig",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
