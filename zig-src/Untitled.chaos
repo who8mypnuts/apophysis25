@@ -1,0 +1,258 @@
+<?xml version="1.0" encoding="utf-8"?>
+<world name="World">
+	<int name="format_version">2</int>
+	<IFS name="Transform 3, Transform 2, Transform 2, Transform 3, Transform 3, Transform 3">
+		<imaging name="Imaging">
+			<int name="image_width">6800</int>
+			<int name="image_height">5522</int>
+			<int name="image_aa_level">2</int>
+			<int name="image_layers">1</int>
+			<string name="antialiasing_mode">strong</string>
+			<real name="brightness">10</real>
+			<vec4 name="background_colour">0 0 0 1</vec4>
+			<bool name="apply_bg_before_curves">false</bool>
+			<real name="flam3_gamma">5</real>
+			<real name="flam3_vibrancy">1</real>
+			<bool name="flam3_use_highlight_power">false</bool>
+			<real name="flam3_highlight_power">0.01</real>
+			<real name="flam3_gamma_linear_threshold">0.0025</real>
+			<curves>
+				<curve name="overall">
+					<table name="knots">
+						<values>0 0.24747473 0.5 0.7525252 1</values>
+					</table>
+					<table name="values">
+						<values>0 0.21212122 0.5 0.80303025 1</values>
+					</table>
+					<table name="back_tension">
+						<values>1 0 0 0 1</values>
+					</table>
+					<table name="forw_tension">
+						<values>1 0 0 0 1</values>
+					</table>
+				</curve>
+				<curve name="10">
+					<table name="knots">
+						<values>0 0.25 0.5 0.75 1</values>
+					</table>
+					<table name="values">
+						<values>0 0.25 0.540404 0.75 1</values>
+					</table>
+					<table name="back_tension">
+						<values>1 0 0 0 1</values>
+					</table>
+					<table name="forw_tension">
+						<values>1 0 0 0 1</values>
+					</table>
+				</curve>
+			</curves>
+			<table name="layer_weights">
+				<values>1 1 1 1</values>
+			</table>
+		</imaging>
+		<camera name="flam3 camera">
+			<vec2 name="pos">0 0</vec2>
+			<real name="rotate">0</real>
+			<real name="sensor_width">4</real>
+		</camera>
+		<node name="iterators">
+			<iterator name="Iterator 1">
+				<flam3_transform name="flam3_xform 1">
+					<affine2 name="Pre affine">
+						<real name="x_axis_angle">90</real>
+						<real name="x_axis_length">0.909091</real>
+						<real name="y_axis_angle">180</real>
+						<real name="y_axis_length">0.909091</real>
+						<vec2 name="offset">0 0</vec2>
+					</affine2>
+					<affine2 name="Post affine">
+						<real name="x_axis_angle">90</real>
+						<real name="x_axis_length">1</real>
+						<real name="y_axis_angle">180</real>
+						<real name="y_axis_length">1</real>
+						<vec2 name="offset">0 0</vec2>
+					</affine2>
+					<node name="transforms">
+						<flam3_variation name="Transform 3">
+							<string name="variation_name">elliptic</string>
+							<params>
+								<real name="elliptic">1</real>
+							</params>
+						</flam3_variation>
+					</node>
+				</flam3_transform>
+				<flam3_shader name="flam3 shader">
+					<real name="palette_index">0</real>
+					<real name="blend_speed">0.478</real>
+					<real name="opacity">1</real>
+					<table name="layer_weights">
+						<values>1 1 1 1</values>
+					</table>
+				</flam3_shader>
+				<weights_selector name="Iterator selection weights">
+					<real name="Base weight">5</real>
+					<node name="per_iterator_weights">
+						<real name="Iterator 1 weight">1</real>
+						<real name="Iterator 2 weight">1</real>
+						<real name="Iterator 4 weight">1</real>
+						<real name="Iterator 5 weight">1</real>
+					</node>
+				</weights_selector>
+				<real name="time_scale">1</real>
+			</iterator>
+			<iterator name="Iterator 2">
+				<flam3_transform name="flam3_xform 2">
+					<affine2 name="Pre affine">
+						<real name="x_axis_angle">0</real>
+						<real name="x_axis_length">0.909091</real>
+						<real name="y_axis_angle">90</real>
+						<real name="y_axis_length">0.909091</real>
+						<vec2 name="offset">0 0</vec2>
+					</affine2>
+					<affine2 name="Post affine">
+						<real name="x_axis_angle">-90</real>
+						<real name="x_axis_length">1</real>
+						<real name="y_axis_angle">0</real>
+						<real name="y_axis_length">1</real>
+						<vec2 name="offset">0 0</vec2>
+					</affine2>
+					<node name="transforms">
+						<flam3_variation name="Transform 2">
+							<string name="variation_name">linear</string>
+							<params>
+								<real name="linear">1</real>
+							</params>
+						</flam3_variation>
+						<flam3_variation name="Transform 2">
+							<string name="variation_name">splits</string>
+							<params>
+								<real name="splits">1</real>
+								<real name="splits_x">1</real>
+								<real name="splits_y">0.099</real>
+							</params>
+						</flam3_variation>
+					</node>
+				</flam3_transform>
+				<flam3_shader name="flam3 shader">
+					<real name="palette_index">0.783</real>
+					<real name="blend_speed">0.5</real>
+					<real name="opacity">1</real>
+					<table name="layer_weights">
+						<values>1 1 1 1</values>
+					</table>
+				</flam3_shader>
+				<weights_selector name="Iterator selection weights">
+					<real name="Base weight">15</real>
+					<node name="per_iterator_weights">
+						<real name="Iterator 1 weight">1</real>
+						<real name="Iterator 2 weight">1</real>
+						<real name="Iterator 4 weight">1</real>
+						<real name="Iterator 5 weight">1</real>
+					</node>
+				</weights_selector>
+				<real name="time_scale">1</real>
+			</iterator>
+			<iterator name="Iterator 4">
+				<flam3_transform name="flam3_xform 4">
+					<affine2 name="Pre affine">
+						<real name="x_axis_angle">0</real>
+						<real name="x_axis_length">1</real>
+						<real name="y_axis_angle">90</real>
+						<real name="y_axis_length">1</real>
+						<vec2 name="offset">0 0</vec2>
+					</affine2>
+					<affine2 name="Post affine">
+						<real name="x_axis_angle">0</real>
+						<real name="x_axis_length">0.101526</real>
+						<real name="y_axis_angle">90</real>
+						<real name="y_axis_length">0.433</real>
+						<vec2 name="offset">0 0.6</vec2>
+					</affine2>
+					<node name="pre_transforms">
+						<flam3_variation name="Transform 3">
+							<string name="variation_name">pre_blur</string>
+							<params>
+								<real name="pre_blur">1</real>
+							</params>
+						</flam3_variation>
+					</node>
+					<node name="transforms">
+						<flam3_variation name="Transform 3">
+							<string name="variation_name">cylinder</string>
+							<params>
+								<real name="cylinder">0.3</real>
+							</params>
+						</flam3_variation>
+					</node>
+				</flam3_transform>
+				<flam3_shader name="flam3 shader">
+					<real name="palette_index">0</real>
+					<real name="blend_speed">0</real>
+					<real name="opacity">1</real>
+					<table name="layer_weights">
+						<values>1 1 1 1</values>
+					</table>
+				</flam3_shader>
+				<weights_selector name="Iterator selection weights">
+					<real name="Base weight">0.5</real>
+					<node name="per_iterator_weights">
+						<real name="Iterator 1 weight">1</real>
+						<real name="Iterator 2 weight">1</real>
+						<real name="Iterator 4 weight">1</real>
+						<real name="Iterator 5 weight">1</real>
+					</node>
+				</weights_selector>
+				<real name="time_scale">1</real>
+			</iterator>
+			<iterator name="Iterator 5">
+				<flam3_transform name="flam3_xform 5">
+					<affine2 name="Pre affine">
+						<real name="x_axis_angle">90</real>
+						<real name="x_axis_length">0.909091</real>
+						<real name="y_axis_angle">180</real>
+						<real name="y_axis_length">0.909091</real>
+						<vec2 name="offset">0 0</vec2>
+					</affine2>
+					<affine2 name="Post affine">
+						<real name="x_axis_angle">180</real>
+						<real name="x_axis_length">0.385543</real>
+						<real name="y_axis_angle">-90</real>
+						<real name="y_axis_length">0.385543</real>
+						<vec2 name="offset">0 0</vec2>
+					</affine2>
+					<node name="transforms">
+						<flam3_variation name="Transform 3">
+							<string name="variation_name">elliptic</string>
+							<params>
+								<real name="elliptic">0.5</real>
+							</params>
+						</flam3_variation>
+					</node>
+				</flam3_transform>
+				<flam3_shader name="flam3 shader">
+					<real name="palette_index">0.358</real>
+					<real name="blend_speed">0.478</real>
+					<real name="opacity">1</real>
+					<table name="layer_weights">
+						<values>1 1 1 1</values>
+					</table>
+				</flam3_shader>
+				<weights_selector name="Iterator selection weights">
+					<real name="Base weight">5</real>
+					<node name="per_iterator_weights">
+						<real name="Iterator 1 weight">1</real>
+						<real name="Iterator 2 weight">1</real>
+						<real name="Iterator 4 weight">1</real>
+						<real name="Iterator 5 weight">1</real>
+					</node>
+				</weights_selector>
+				<real name="time_scale">1</real>
+			</iterator>
+		</node>
+		<colouring>
+			<table name="flam3_palette">
+				<values>0.5411765 0.38823533 0.10588236 0.58431375 0.43921572 0.121568635 0.5529412 0.40000004 0.1137255 0.5254902 0.3647059 0.10588236 0.52156866 0.34509805 0.09411766 0.52156866 0.3254902 0.08235294 0.5176471 0.3137255 0.07450981 0.5137255 0.30588236 0.07058824 0.47058827 0.2509804 0.08627451 0.41960788 0.21568629 0.08235294 0.36862746 0.18039216 0.08235294 0.29803923 0.14117648 0.07450981 0.227451 0.10588236 0.06666667 0.17254902 0.098039225 0.06666667 0.121568635 0.09411766 0.06666667 0.10588236 0.1137255 0.09019608 0.09019608 0.13333334 0.1137255 0.04705883 0.30588236 0.20000002 0.03529412 0.3529412 0.22352943 0.023529414 0.4039216 0.2509804 0.023529414 0.43529415 0.3137255 0.023529414 0.47058827 0.37647063 0.027450982 0.52156866 0.40784317 0.03137255 0.5764706 0.43921572 0.07058824 0.6392157 0.47058827 0.07058824 0.54509807 0.43529415 0.07450981 0.454902 0.4039216 0.06666667 0.40784317 0.37647063 0.058823533 0.3647059 0.34901962 0.058823533 0.3529412 0.33333334 0.0627451 0.34117648 0.31764707 0.07450981 0.26666668 0.24313727 0.08627451 0.19607845 0.15686275 0.098039225 0.098039225 0.058823533 0.12941177 0.09019608 0.039215688 0.16078432 0.08627451 0.019607844 0.20784315 0.10588236 0.015686275 0.25882354 0.1254902 0.011764707 0.28235295 0.14117648 0.007843138 0.30588236 0.16078432 0.007843138 0.39607847 0.21568629 0.007843138 0.43921572 0.21960786 0.007843138 0.48235297 0.22352943 0.007843138 0.5176471 0.21176472 0.007843138 0.5568628 0.20000002 0.007843138 0.58431375 0.19215688 0.007843138 0.6156863 0.18823531 0.007843138 0.64705884 0.227451 0.019607844 0.65882355 0.24705884 0.054901965 0.5686275 0.28235295 0.121568635 0.5294118 0.3019608 0.13333334 0.4901961 0.3254902 0.14901961 0.43529415 0.35686275 0.16862746 0.3803922 0.38823533 0.18823531 0.34117648 0.3921569 0.18823531 0.3019608 0.39607847 0.18823531 0.21568629 0.36862746 0.14509805 0.21176472 0.33333334 0.121568635 0.21176472 0.3019608 0.10196079 0.28235295 0.27058825 0.06666667 0.35686275 0.2392157 0.03529412 0.40784317 0.23137257 0.023529414 0.45882356 0.22352943 0.011764707 0.5137255 0.22352943 0.007843138 0.5372549 0.21176472 0.003921569 0.52156866 0.20000002 0.003921569 0.52156866 0.18823531 0.007843138 0.5254902 0.1764706 0.011764707 0.50980395 0.16862746 0.011764707 0.49803925 0.16078432 0.011764707 0.46274513 0.14509805 0.015686275 0.42352945 0.14117648 0.015686275 0.3647059 0.11764707 0.011764707 0.32941177 0.10196079 0.011764707 0.29803923 0.08627451 0.011764707 0.28235295 0.09019608 0.011764707 0.26666668 0.098039225 0.011764707 0.25882354 0.10588236 0.011764707 0.25490198 0.11764707 0.015686275 0.2392157 0.12941177 0.019607844 0.24313727 0.13725491 0.011764707 0.28627452 0.17254902 0.015686275 0.30980393 0.20392159 0.027450982 0.33333334 0.2392157 0.039215688 0.34901962 0.2509804 0.03529412 0.3647059 0.26666668 0.03529412 0.40000004 0.2784314 0.027450982 0.41960788 0.29803923 0.011764707 0.39607847 0.3019608 0.03137255 0.34117648 0.28235295 0.027450982 0.2901961 0.2627451 0.027450982 0.25490198 0.2509804 0.019607844 0.22352943 0.2392157 0.011764707 0.16470589 0.21176472 0.007843138 0.11764707 0.1764706 0.015686275 0.078431375 0.15294118 0.015686275 0.050980397 0.121568635 0.015686275 0.019607844 0.078431375 0 0.023529414 0.07450981 0 0.027450982 0.07058824 0 0.039215688 0.07058824 0 0.050980397 0.07450981 0 0.08235294 0.08627451 0.003921569 0.14509805 0.10196079 0.011764707 0.28627452 0.16470589 0.03529412 0.3372549 0.20392159 0.043137256 0.3921569 0.24705884 0.054901965 0.41176474 0.25490198 0.058823533 0.43137258 0.2627451 0.0627451 0.47058827 0.27058825 0.0627451 0.5019608 0.2784314 0.054901965 0.5137255 0.28235295 0.0627451 0.50980395 0.28627452 0.054901965 0.43529415 0.23529413 0.043137256 0.41176474 0.21568629 0.03137255 0.38823533 0.19607845 0.023529414 0.3254902 0.16078432 0.007843138 0.27450982 0.14509805 0.003921569 0.227451 0.14509805 0.003921569 0.18823531 0.16470589 0.003921569 0.12941177 0.21960786 0.003921569 0.1137255 0.24705884 0.03137255 0.098039225 0.27450982 0.058823533 0.09019608 0.29803923 0.06666667 0.08627451 0.3254902 0.07450981 0.10196079 0.34901962 0.078431375 0.10588236 0.37254903 0.058823533 0.10588236 0.37647063 0.06666667 0.10196079 0.34901962 0.08627451 0.09411766 0.30588236 0.098039225 0.10196079 0.29411766 0.08235294 0.10980393 0.28235295 0.06666667 0.1137255 0.24705884 0.043137256 0.121568635 0.21568629 0.03529412 0.1254902 0.18823531 0.03529412 0.14509805 0.18431373 0.027450982 0.2627451 0.24313727 0.019607844 0.33333334 0.2901961 0.03529412 0.40784317 0.3372549 0.054901965 0.43137258 0.34901962 0.054901965 0.45882356 0.3647059 0.058823533 0.48235297 0.38823533 0.0627451 0.47450984 0.41176474 0.07058824 0.47058827 0.44705886 0.10196079 0.5058824 0.52156866 0.16078432 0.59607846 0.5882353 0.21568629 0.58431375 0.5803922 0.21176472 0.5764706 0.57254905 0.20784315 0.5137255 0.5176471 0.18823531 0.4784314 0.5176471 0.18039216 0.48627454 0.5254902 0.19215688 0.5411765 0.5294118 0.18039216 0.59607846 0.454902 0.11764707 0.5882353 0.43529415 0.09411766 0.5803922 0.41960788 0.07058824 0.5686275 0.40000004 0.043137256 0.5647059 0.40000004 0.023529414 0.5764706 0.3921569 0.015686275 0.5921569 0.3921569 0.015686275 0.6156863 0.40000004 0.023529414 0.6431373 0.41176474 0.023529414 0.7137255 0.4039216 0.015686275 0.73333335 0.41176474 0.015686275 0.75294125 0.41960788 0.015686275 0.79215693 0.42352945 0.03529412 0.8196079 0.454902 0.054901965 0.8431373 0.5019608 0.08235294 0.86274517 0.5019608 0.10588236 0.8941177 0.53333336 0.15294118 0.8980393 0.54901963 0.16078432 0.90196085 0.5647059 0.17254902 0.87843144 0.5921569 0.20000002 0.8196079 0.6117647 0.227451 0.7490196 0.6313726 0.23529413 0.69411767 0.60784316 0.23529413 0.6745098 0.6 0.23137257 0.6784314 0.5647059 0.21176472 0.6784314 0.54509807 0.20784315 0.63529414 0.5411765 0.19215688 0.60784316 0.5254902 0.17254902 0.59607846 0.5137255 0.16470589 0.6039216 0.4901961 0.13725491 0.64705884 0.47058827 0.12941177 0.67058825 0.46274513 0.121568635 0.68235296 0.4784314 0.13333334 0.6784314 0.48235297 0.12941177 0.6784314 0.48627454 0.1254902 0.6784314 0.49803925 0.13333334 0.69411767 0.5019608 0.13725491 0.72156864 0.5176471 0.16078432 0.7411765 0.52156866 0.19215688 0.7568628 0.53333336 0.20000002 0.7607844 0.54509807 0.20784315 0.7568628 0.5529412 0.20392159 0.7686275 0.5686275 0.21176472 0.7686275 0.5647059 0.227451 0.76470596 0.56078434 0.23137257 0.7725491 0.5568628 0.21568629 0.7607844 0.54901963 0.19215688 0.75294125 0.54509807 0.16470589 0.7411765 0.5294118 0.15294118 0.7254902 0.50980395 0.14901961 0.7176471 0.48235297 0.13725491 0.7019608 0.43921572 0.121568635 0.6784314 0.4039216 0.10196079 0.6509804 0.3647059 0.078431375 0.6313726 0.34901962 0.07058824 0.61960787 0.34509805 0.0627451 0.61960787 0.34509805 0.0627451 0.61960787 0.36078432 0.07058824 0.61960787 0.37647063 0.06666667 0.63529414 0.41176474 0.09019608 0.65882355 0.45882356 0.1254902 0.6901961 0.5058824 0.15294118 0.72156864 0.54901963 0.18431373 0.7294118 0.57254905 0.18823531 0.72156864 0.5764706 0.17254902 0.7019608 0.5568628 0.1764706 0.6509804 0.50980395 0.16862746 0.5921569 0.47058827 0.16078432 0.5254902 0.41960788 0.14901961 0.454902 0.3647059 0.10196079 0.38823533 0.31764707 0.06666667 0.31764707 0.25882354 0.03529412 0.2509804 0.22352943 0.015686275 0.19607845 0.19215688 0.007843138 0.15294118 0.16470589 0 0.1254902 0.15686275 0 0.1137255 0.17254902 0 0.10588236 0.20000002 0.007843138 0.1137255 0.23137257 0.011764707 0.14117648 0.2509804 0.023529414 0.17254902 0.25882354 0.03137255 0.20392159 0.27058825 0.039215688 0.23529413 0.28627452 0.04705883 0.2509804 0.3019608 0.058823533 0.2901961 0.30588236 0.06666667 0.32941177 0.29411766 0.078431375 0.36078432 0.2784314 0.07450981 0.37647063 0.25882354 0.0627451 0.35686275 0.24705884 0.0627451 0.3372549 0.24705884 0.07058824 0.31764707 0.25882354 0.098039225 0.2901961 0.2784314 0.12941177 0.27058825 0.29411766 0.14901961 0.24313727 0.29803923 0.15294118 0.21176472 0.29803923 0.14509805 0.20000002 0.3019608 0.13725491 0.19607845 0.30980393 0.14901961 0.2392157 0.3372549 0.16470589 0.32941177 0.40000004 0.21176472 0.38823533 0.4156863 0.20784315 0.4156863 0.4156863 0.17254902 0.4156863 0.38823533 0.14509805 0.4039216 0.33333334 0.08627451 0.4666667 0.36078432 0.09411766</values>
+			</table>
+		</colouring>
+	</IFS>
+</world>

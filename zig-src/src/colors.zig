@@ -36,36 +36,49 @@ pub const ColorNode = struct {
     color: Color,
 };
 
+pub const MAX_NODES = 256;
+
 pub const Palette = struct {
     colors: [256]Color,
-    nodes: [16]ColorNode,
-    num_nodes: u8,
+    nodes: [MAX_NODES]ColorNode,
+    num_nodes: u32,
 
     pub fn initDefault() Palette {
         var p = Palette{ 
             .colors = undefined,
             .nodes = undefined,
-            .num_nodes = 3,
+            .num_nodes = 2,
         };
+        p.nodes[0] = ColorNode{ .pos = 0.0, .color = Color{ .r = 0, .g = 0, .b = 0 } };
+        p.nodes[1] = ColorNode{ .pos = 1.0, .color = Color{ .r = 1, .g = 1, .b = 1 } };
         
-        p.nodes[0] = ColorNode{ .pos = 0.0, .color = Color{ .r = 1, .g = 0, .b = 0 } };
-        p.nodes[1] = ColorNode{ .pos = 0.5, .color = Color{ .r = 0, .g = 1, .b = 0 } };
-        p.nodes[2] = ColorNode{ .pos = 1.0, .color = Color{ .r = 0, .g = 0, .b = 1 } };
-        
-        p.bake();
+        p.bake(null);
         return p;
     }
 
-    pub fn bake(self: *Palette) void {
+    pub fn bake(self: *Palette, tracked_index: ?*i32) void {
         if (self.num_nodes == 0) return;
         
-        // Sort nodes by position (simple bubble sort for now, small n)
+        // Sort nodes by position (Ensuring selection follows node)
         for (0..self.num_nodes) |i| {
-            for (i+1..self.num_nodes) |j| {
-                if (self.nodes[i].pos > self.nodes[j].pos) {
-                    const tmp = self.nodes[i];
-                    self.nodes[i] = self.nodes[j];
-                    self.nodes[j] = tmp;
+            var min_idx = i;
+            for (i + 1..self.num_nodes) |j| {
+                if (self.nodes[j].pos < self.nodes[min_idx].pos) {
+                    min_idx = j;
+                }
+            }
+            if (min_idx != i) {
+                const tmp = self.nodes[i];
+                self.nodes[i] = self.nodes[min_idx];
+                self.nodes[min_idx] = tmp;
+
+                // Update tracked index
+                if (tracked_index) |idx_ptr| {
+                    if (idx_ptr.* == @as(i32, @intCast(i))) {
+                        idx_ptr.* = @as(i32, @intCast(min_idx));
+                    } else if (idx_ptr.* == @as(i32, @intCast(min_idx))) {
+                        idx_ptr.* = @as(i32, @intCast(i));
+                    }
                 }
             }
         }

@@ -1,0 +1,6 @@
+<flame name="TestPal" >
+   <xform weight="1" color="0" coefs="1 0 0 1 0 0" />
+   <palette count="256" format="RGB">
+      FF000000FF000000FFFF000000FF000000FF
+   </palette>
+</flame>

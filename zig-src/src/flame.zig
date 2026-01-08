@@ -128,6 +128,36 @@ pub const Xform = struct {
         out.y = vy;
         // out.c will be averaged in the flame iterator
     }
+
+    pub fn rotate(self: *Xform, angle_degrees: f32) void {
+        const rad = angle_degrees * std.math.pi / 180.0;
+        const c = @cos(rad);
+        const s = @sin(rad);
+
+        // Apply rotation matrix [ c -s ]
+        //                       [ s  c ]
+        // to the affine matrix  [ a c_coef ] (using c_coef because c is taken)
+        //                       [ b d      ]
+
+        // New basis vectors:
+        // X' = X * cos - Y * sin
+        // Y' = X * sin + Y * cos
+        
+        // Wait, standard affine composition: 
+        // We want to rotate the current transform.
+        // If we view the transform as a coordinate frame (a,b) and (c,d),
+        // we rotate these vectors.
+        
+        const new_a = self.a * c - self.c * s;
+        const new_b = self.b * c - self.d * s;
+        const new_c = self.a * s + self.c * c;
+        const new_d = self.b * s + self.d * c;
+
+        self.a = new_a;
+        self.b = new_b;
+        self.c = new_c;
+        self.d = new_d;
+    }
 };
 
 pub const Flame = struct {

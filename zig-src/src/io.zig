@@ -257,6 +257,29 @@ pub const IO = struct {
              parseFlameAttrs(flame_tag, &f);
         }
         
+        // Find <palette ...> and parse it
+        if (findTag(buffer, "palette")) |_| {
+             const end_tag = "</palette>";
+             if (std.mem.indexOf(u8, buffer, end_tag)) |pal_end_idx| {
+                 // We found the tag content start in `pal_tag`, but `findTag` returns the opening tag itself?
+                 // Wait, `findTag` implementation: returns buffer[s..s+e]. That is just `<flame ... >`.
+                 // So we need to find the content BETWEEN the opening tag and closing tag.
+                 
+                 // Re-locate opening tag in buffer
+                 const needle = "<palette";
+                 if (std.mem.indexOf(u8, buffer, needle)) |start_idx| {
+                     const gt_idx = std.mem.indexOf(u8, buffer[start_idx..], ">");
+                     if (gt_idx) |gt| {
+                         const content_start = start_idx + gt + 1;
+                         if (content_start < pal_end_idx) {
+                             const pal_content = buffer[content_start..pal_end_idx];
+                             try parseLegacyPalette(pal_content, &f.palette);
+                         }
+                     }
+                 }
+             }
+        }
+
         var idx: usize = 0;
         var pos: usize = 0;
         while (findNextTag(buffer[pos..], "xform")) |res| {
@@ -275,6 +298,60 @@ pub const IO = struct {
         }
         
         return f;
+    }
+
+    fn parseLegacyPalette(content: []const u8, pal: *colors.Palette) !void {
+        var color_idx: usize = 0;
+        var current_hex: [6]u8 = undefined;
+        var current_hex_len: usize = 0;
+
+        for (content) |c| {
+            // hex chars usually 0-9, A-F
+            if ((c >= '0' and c <= '9') or (c >= 'A' and c <= 'F') or (c >= 'a' and c <= 'f')) {
+                current_hex[current_hex_len] = c;
+                current_hex_len += 1;
+                
+                if (current_hex_len == 6) {
+                    if (color_idx < 256) {
+                        pal.colors[color_idx] = colors.Color{
+                            .r = parseHexFloat(current_hex[0], current_hex[1]),
+                            .g = parseHexFloat(current_hex[2], current_hex[3]),
+                            .b = parseHexFloat(current_hex[4], current_hex[5]),
+                            .a = 1.0,
+                        };
+                        color_idx += 1;
+                    }
+                    current_hex_len = 0;
+                }
+            }
+        }
+        
+        // Auto-generate nodes from the loaded palette
+        // Create 16 control nodes spaced evenly
+        pal.num_nodes = 16;
+        var i: usize = 0;
+        while (i < 16) : (i += 1) {
+            const pos = @as(f32, @floatFromInt(i)) / 15.0;
+            const idx = @as(usize, @intFromFloat(pos * 255.0));
+            pal.nodes[i] = colors.ColorNode{
+                .pos = pos,
+                .color = pal.colors[idx],
+            };
+        }
+    }
+    
+    fn parseHexFloat(c1: u8, c2: u8) f32 {
+        const v1 = parseHexDigit(c1);
+        const v2 = parseHexDigit(c2);
+        const val = (v1 << 4) | v2;
+        return @as(f32, @floatFromInt(val)) / 255.0;
+    }
+    
+    fn parseHexDigit(c: u8) u8 {
+        if (c >= '0' and c <= '9') return c - '0';
+        if (c >= 'A' and c <= 'F') return c - 'A' + 10;
+        if (c >= 'a' and c <= 'f') return c - 'a' + 10;
+        return 0;
     }
     
     // Simple XML helpers
@@ -426,5 +503,40 @@ test "load legacy flame xml" {
     try std.testing.expectApproxEqAbs(f.xforms[0].weight, 0.8, 0.001);
     try std.testing.expectApproxEqAbs(f.xforms[0].linear, 1.0, 0.001);
     try std.testing.expectApproxEqAbs(f.xforms[1].julia, 1.5, 0.001);
+}
+
+test "load legacy flame palette" {
+    const allocator = std.testing.allocator;
+    // Minimal palette string with red, green, blue hexes (just for testing parsing)
+    // We repeats colors to fill 256 entries roughly or just enough to test
+    // "FF0000" (Red), "00FF00" (Green), "0000FF" (Blue)
+    const test_xml =
+        \\<flame name="TestPal" >
+        \\   <xform weight="1" color="0" coefs="1 0 0 1 0 0" />
+        \\   <palette count="256" format="RGB">
+        \\      FF000000FF000000FFFF000000FF000000FF
+        \\   </palette>
+        \\</flame>
+    ;
+    
+    try std.fs.cwd().writeFile(.{ .sub_path = "test_pal.flame", .data = test_xml });
+    
+    const f = try IO.loadLegacyFlameXml(allocator, "test_pal.flame");
+    defer allocator.free(f.xforms);
+    
+    // Check first few colors
+    // FF0000 -> R=1, G=0, B=0
+    try std.testing.expectApproxEqAbs(f.palette.colors[0].r, 1.0, 0.001);
+    try std.testing.expectApproxEqAbs(f.palette.colors[0].g, 0.0, 0.001);
+    try std.testing.expectApproxEqAbs(f.palette.colors[0].b, 0.0, 0.001);
+
+    // 00FF00 -> R=0, G=1, B=0
+    try std.testing.expectApproxEqAbs(f.palette.colors[1].r, 0.0, 0.001);
+    try std.testing.expectApproxEqAbs(f.palette.colors[1].g, 1.0, 0.001);
+
+    // Check node generation
+    try std.testing.expectEqual(f.palette.num_nodes, 16);
+    // Node 0 should match color 0
+    try std.testing.expectApproxEqAbs(f.palette.nodes[0].color.r, 1.0, 0.001);
 }
 
