@@ -6,6 +6,7 @@ const colors = @import("colors.zig");
 const renderer = @import("renderer.zig");
 const io = @import("io.zig");
 const gradient_browser = @import("gradient_browser.zig");
+const image_browser = @import("image_browser.zig");
 
 // Coordinate conversion helpers
 fn toScreen(wx: f32, wy: f32, zoom: f32, width: f32, height: f32) rl.Vector2 {
@@ -43,6 +44,16 @@ fn flameToRlColor(c: colors.Color) rl.Color {
     );
 }
 
+fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
+    if (needle.len == 0) return true;
+    if (needle.len > haystack.len) return false;
+    var i: usize = 0;
+    while (i <= haystack.len - needle.len) : (i += 1) {
+        if (std.ascii.eqlIgnoreCase(haystack[i .. i + needle.len], needle)) return true;
+    }
+    return false;
+}
+
 pub fn drawFloatControl(
     bounds: rl.Rectangle,
     text: [:0]const u8,
@@ -52,87 +63,126 @@ pub fn drawFloatControl(
     active_id: *i32,
     this_id: i32,
     shared_buffer: []u8
-) void {
+) bool {
     const sliderWidth: f32 = bounds.width - 70.0;
     const boxWidth: f32 = 65.0;
-    
-    // Draw Label (above or left? The passed bounds are for the control area)
-    // The previous code had separate label calls.
-    // Let's assume this function handles the slider + box part, and label is drawn separately or passed in 'text'.
-    // Existing code: Label line, then Slider line.
-    // This function will draw: [Slider --] [Box]
-    // The label "text" is for the slider (usually left of it or inside).
-    // Let's make it compact.
-    
+
     const sliderBounds = rl.Rectangle.init(bounds.x, bounds.y, sliderWidth, bounds.height);
     const boxBounds = rl.Rectangle.init(bounds.x + sliderWidth + 5.0, bounds.y, boxWidth, bounds.height);
 
+    const old_val = value.*;
     _ = rg.slider(sliderBounds, text, "", value, min, max);
 
+    var changed = (value.* != old_val);
+
     const is_editing = (active_id.* == this_id);
-    
-    // Bounds for the value box already declared above at line 67
 
     if (is_editing) {
-        // Edit Mode: Draw TextBox
-        // Prepare buffer slice
         shared_buffer[shared_buffer.len-1] = 0;
         const buf_ptr = shared_buffer[0 .. shared_buffer.len-1 :0];
-        
-        // TextBox returns true if ENTER is pressed
+
         if (rg.textBox(boxBounds, buf_ptr, 32, true)) {
-            // Apply changes
-            // Parse float
              const parsed = std.fmt.parseFloat(f32, std.mem.sliceTo(shared_buffer, 0)) catch null;
-             if (parsed) |v| {
-                 value.* = v;
+             if (parsed) |raw_v| {
+                 const v = @max(min, @min(max, raw_v));
+                 if (value.* != v) {
+                     value.* = v;
+                     changed = true;
+                 }
              }
              active_id.* = -1;
         }
-        
-        // Optional: Check for click outside to commit/cancel?
-        // Raygui keeps focus usually until Enter or click elsewhere. 
-        // If we click another control, `active_id` changes in that control's logic?
-        // No, we need to detect clicks outside.
+
         if (rl.isMouseButtonPressed(rl.MouseButton.left)) {
              const mouse = rl.getMousePosition();
              if (!rl.checkCollisionPointRec(mouse, boxBounds)) {
-                 // Clicked outside: Commit and close
                  const parsed = std.fmt.parseFloat(f32, std.mem.sliceTo(shared_buffer, 0)) catch null;
-                 if (parsed) |v| {
-                     value.* = v;
+                 if (parsed) |raw_v| {
+                     const v = @max(min, @min(max, raw_v));
+                     if (value.* != v) {
+                        value.* = v;
+                        changed = true;
+                     }
                  }
                  active_id.* = -1;
              }
         }
     } else {
-        // Display Mode: Draw ValueBox (static)
         var temp_buf: [32]u8 = undefined;
         const buf_ptr = std.fmt.bufPrintZ(&temp_buf, "{d:.3}", .{value.*}) catch blk: {
             temp_buf[0] = 0;
             break :blk temp_buf[0..0 :0];
         };
-        
-        // Use valueBox in non-edit mode just for display style
-        // We pass 'false' for editMode.
-        var dummy_val: c_int = 0;
-        _ = rg.valueBox(boxBounds, "", &dummy_val, 0, 0, false);
-        // Overwrite text with float string manually because valueBox takes int*
-        // Actually, let's just use `guiLabel` or `guiTextBox(..., false)` (read only)
-        // `valueBoxFloat` (false) works for display? The user said "cannot type".
-        // Let's use `textBox` (edit=false) to show the number.
+
         _ = rg.textBox(boxBounds, buf_ptr, 32, false);
-        
-        // Manual Click Detection to Enter Edit Mode
+
         const mouse_pos = rl.getMousePosition();
         if (rl.checkCollisionPointRec(mouse_pos, boxBounds) and rl.isMouseButtonPressed(rl.MouseButton.left)) {
              active_id.* = this_id;
-             // Seed the buffer for editing
-             _ = std.fmt.bufPrintZ(shared_buffer, "{d}", .{value.*}) catch {}; 
-             // Use plain {d} for editing to avoid trailing zeros if possible, or {d:.3} if preferred.
-             // {d} preserves precision better for re-parsing.
+             _ = std.fmt.bufPrintZ(shared_buffer, "{d}", .{value.*}) catch {};
         }
     }
+    return changed;
+}
+
+
+fn smoothPaletteFromImage(f: *flame.Flame, path: [:0]const u8, rnd: std.Random, render_state: anytype) void {
+    const img = rl.loadImage(path) catch {
+        std.debug.print("Failed to load image: {s}\n", .{path});
+        return;
+    };
+    defer rl.unloadImage(img);
+
+    const colors_ptr = rl.loadImageColors(img) catch return;
+    defer rl.unloadImageColors(colors_ptr);
+
+    const num_pixels = @as(usize, @intCast(img.width)) * @as(usize, @intCast(img.height));
+    const pixel_colors = colors_ptr[0..num_pixels];
+
+    // Collect unique colors
+    var unique_colors = std.AutoHashMap(u32, void).init(std.heap.page_allocator);
+    defer unique_colors.deinit();
+
+    for (pixel_colors) |c| {
+        const u = (@as(u32, c.r) << 24) | (@as(u32, c.g) << 16) | (@as(u32, c.b) << 8) | c.a;
+        unique_colors.put(u, {}) catch {};
+    }
+
+    var color_list = std.ArrayListUnmanaged(rl.Color){};
+    defer color_list.deinit(std.heap.page_allocator);
+
+    var it = unique_colors.keyIterator();
+    while (it.next()) |u_ptr| {
+        const u = u_ptr.*;
+        color_list.append(std.heap.page_allocator, rl.Color{
+            .r = @as(u8, @intCast((u >> 24) & 0xFF)),
+            .g = @as(u8, @intCast((u >> 16) & 0xFF)),
+            .b = @as(u8, @intCast((u >> 8) & 0xFF)),
+            .a = @as(u8, @intCast(u & 0xFF)),
+        }) catch {};
+    }
+
+    if (color_list.items.len < 2) return;
+
+    // Shuffle
+    rnd.shuffle(rl.Color, color_list.items);
+
+    // Pick up to 256
+    const pick_count = @min(color_list.items.len, 256);
+    const final_colors = color_list.items[0..pick_count];
+
+    // Distribute across nodes
+    f.palette.num_nodes = @as(u32, @intCast(pick_count));
+    for (final_colors, 0..) |c, i| {
+        f.palette.nodes[i] = colors.ColorNode{
+            .pos = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(pick_count - 1)),
+            .color = rlToFlameColor(c),
+        };
+    }
+
+    f.palette.bake(null);
+    render_state.upload_palette(f.palette.colors[0..]);
+    render_state.reset_histogram();
 }
 
 pub fn main() anyerror!void {
@@ -150,7 +200,7 @@ pub fn main() anyerror!void {
     var gamma: f32 = 2.2;
     var brightness: f32 = 1.0;
     var vibrancy: f32 = 1.0;
-    
+
     var selected_xform: i32 = 0;
     var active_edit_id: i32 = -1; // -1 means no active edit
     var edit_buffer: [32]u8 = undefined; // Shared buffer for text editing
@@ -170,28 +220,28 @@ pub fn main() anyerror!void {
     var last_color_node_idx: i32 = -1;
     var last_history_idx: usize = 0;
 
-    
+
     // Triangle Editor State
     var drag_mode: enum { None, DragO, DragX, DragY, DragScale, DragRotate } = .None;
     var drag_start_mouse: rl.Vector2 = rl.Vector2{ .x = 0, .y = 0 };
     var drag_start_val: rl.Vector2 = rl.Vector2{ .x = 0, .y = 0 }; // Stores original O, X, or Y world pos
     var move_step: f32 = 0.1;
     var show_grid: bool = false;
-    
 
-    
+
+
     // For scale drag, store original coefficients
     var drag_original_a: f32 = 0;
     var drag_original_b: f32 = 0;
     var drag_original_c: f32 = 0;
     var drag_original_d: f32 = 0;
-    
+
     // History System
     const UndoStack = struct {
         items: std.ArrayList(flame.Flame),
         current_idx: usize,
         allocator: std.mem.Allocator,
-        
+
         fn init(allocator: std.mem.Allocator) @This() {
             return .{
                 .items = .{},
@@ -199,25 +249,25 @@ pub fn main() anyerror!void {
                 .allocator = allocator,
             };
         }
-        
+
         fn deinit(self: *@This()) void {
             for (self.items.items) |*item| {
                 self.allocator.free(item.xforms);
             }
             self.items.deinit(self.allocator);
         }
-        
+
         fn push(self: *@This(), f: flame.Flame) !void {
             // Remove any redo history
             while (self.items.items.len > self.current_idx) {
                 const popped = self.items.pop() orelse break;
                 self.allocator.free(popped.xforms);
             }
-            
+
             // Clone the flame
             const xforms_copy = try self.allocator.alloc(flame.Xform, f.xforms.len);
             @memcpy(xforms_copy, f.xforms);
-            
+
             const f_copy = flame.Flame{
                 .xforms = xforms_copy,
                 .palette = f.palette,
@@ -225,25 +275,25 @@ pub fn main() anyerror!void {
                 .brightness = f.brightness,
                 .vibrancy = f.vibrancy,
             };
-            
+
             try self.items.append(self.allocator, f_copy);
             self.current_idx = self.items.items.len;
         }
-        
+
         fn canUndo(self: *const @This()) bool {
             return self.current_idx > 1;
         }
-        
+
         fn canRedo(self: *const @This()) bool {
             return self.current_idx < self.items.items.len;
         }
-        
+
         fn undo(self: *@This()) ?flame.Flame {
             if (!self.canUndo()) return null;
             self.current_idx -= 1;
             return self.items.items[self.current_idx - 1];
         }
-        
+
         fn redo(self: *@This()) ?flame.Flame {
             if (!self.canRedo()) return null;
             const result = self.items.items[self.current_idx];
@@ -251,9 +301,9 @@ pub fn main() anyerror!void {
             return result;
         }
     };
-    
+
     var allocator = std.heap.page_allocator;
-    
+
     // Initialize Gradient Browser library
     var gradient_library = gradient_browser.GradientLibrary.init(allocator);
     defer gradient_library.deinit();
@@ -262,7 +312,7 @@ pub fn main() anyerror!void {
     gradient_library.loadFromFile("ag7.ugr") catch {
         // It's OK if file doesn't exist yet
     };
-    
+
     // Gradient Browser UI state
     var show_gradient_browser: bool = false;
     var gradient_browser_selected: ?usize = null;
@@ -275,10 +325,19 @@ pub fn main() anyerror!void {
     var gradient_context_menu_idx: usize = 0;
     var gradient_clipboard: ?gradient_browser.GradientEntry = null;
     defer if (gradient_clipboard) |*cp| cp.deinit(allocator);
-    
+
+    // Variation Explorer State
+    var variation_search_buf: [32:0]u8 = undefined;
+    @memset(variation_search_buf[0..], 0);
+    var variation_scroll: rl.Vector2 = rl.Vector2{ .x = 0, .y = 0 };
+    var show_only_active_variations: bool = false;
+
+    var img_browser = try image_browser.ImageBrowser.init(allocator);
+    defer img_browser.deinit();
+
     var history = UndoStack.init(allocator);
     defer history.deinit();
-    
+
     var initial_xforms = try allocator.alloc(flame.Xform, 3);
     initial_xforms[0] = flame.Xform{ .a = 0.5, .d = 0.5, .e = 0.0, .f = 0.0, .swirl = 1.0, .color = 0.0 };
     initial_xforms[1] = flame.Xform{ .a = 0.5, .d = 0.5, .e = 0.5, .f = 0.0, .horseshoe = 1.0, .color = 0.5 };
@@ -309,7 +368,7 @@ pub fn main() anyerror!void {
     // We need to keep the texture alive
     const texture = try rl.loadTextureFromImage(image);
     // Unload image data, we will update texture directly from our buffer
-    rl.unloadImage(image); 
+    rl.unloadImage(image);
 
     // Pixel buffer for Raylib
     const pixel_buffer = try std.heap.page_allocator.alloc(u8, @as(usize, renderWidth * renderHeight * 4));
@@ -321,12 +380,12 @@ pub fn main() anyerror!void {
         render_state.gamma = gamma;
         render_state.brightness = brightness;
         render_state.vibrancy = vibrancy;
-        
+
         render_state.render_iterations(f, @as(usize, @intFromFloat(iterations_per_frame)));
 
         // Update texture
         // TODO: Update renderer settings like zoom
-        // render_state.zoom = zoom; 
+        // render_state.zoom = zoom;
 
         if (render_state.gpu_enabled) {
             render_state.update_and_draw_gpu();
@@ -340,7 +399,7 @@ pub fn main() anyerror!void {
         defer rl.endDrawing();
 
         rl.clearBackground(rl.Color.fromInt(0x181818FF)); // Dark gray background
-        
+
         // Draw the accumulator texture
         if (render_state.gpu_enabled) {
             // Draw result from GPU (note: RT textures are upside down)
@@ -357,15 +416,15 @@ pub fn main() anyerror!void {
              const center_y = @as(f32, @floatFromInt(renderHeight)) / 2.0;
              const grid_color = rl.Color{ .r = 60, .g = 60, .b = 60, .a = 255 };
              const axis_color = rl.Color{ .r = 100, .g = 100, .b = 100, .a = 255 };
-             
+
              // Calculate visible world bounds
              const min_x_world = (0.0 - center_x) / zoom;
              const max_x_world = (@as(f32, @floatFromInt(renderWidth)) - center_x) / zoom;
              const min_y_world = (0.0 - center_y) / zoom;
              const max_y_world = (@as(f32, @floatFromInt(renderHeight)) - center_y) / zoom;
-             
+
              const grid_step: f32 = 0.5;
-             
+
              // Draw vertical lines
              var gx = @floor(min_x_world / grid_step) * grid_step;
              while (gx <= max_x_world) : (gx += grid_step) {
@@ -373,7 +432,7 @@ pub fn main() anyerror!void {
                  const color = if (@abs(gx) < 0.001) axis_color else grid_color;
                  rl.drawLine(@as(i32, @intFromFloat(sx)), @as(i32, @intFromFloat(MENU_HEIGHT)), @as(i32, @intFromFloat(sx)), @as(i32, @intFromFloat(MENU_HEIGHT)) + renderHeight, color);
              }
-             
+
              // Draw horizontal lines (Y increases downward in screen space, upward in world space)
              var gy = @floor(min_y_world / grid_step) * grid_step;
              while (gy <= max_y_world) : (gy += grid_step) {
@@ -387,23 +446,23 @@ pub fn main() anyerror!void {
         const rWidthF = @as(f32, @floatFromInt(renderWidth));
         const rHeightF = @as(f32, @floatFromInt(renderHeight));
         var mouse_pos = rl.getMousePosition();
-        
+
         // Adjust mouse for menu offset
         mouse_pos.y -= MENU_HEIGHT;
-        
-        
+
+
         const raw_mouse = rl.getMousePosition();
         const mouse_on_menu = (raw_mouse.y < MENU_HEIGHT);
-        
+
         // Only block if mouse is in menu bar OR in an open menu dropdown area OR modal is open
-        var input_blocked = mouse_on_menu or show_gradient_browser;
+        var input_blocked = mouse_on_menu or show_gradient_browser or img_browser.is_active;
         if (file_menu_open and raw_mouse.y < MENU_HEIGHT + 24.0 * 3.0 and raw_mouse.x < 120.0) {
             input_blocked = true;
         }
         if (edit_menu_open and raw_mouse.y < MENU_HEIGHT + 24.0 * 4.0 and raw_mouse.x >= 60 and raw_mouse.x < 60 + 170.0) {
             input_blocked = true;
         }
-        
+
         // Mouse wheel zoom (when not over menu or GUI panel)
         if (!input_blocked and raw_mouse.x < renderWidth) {
             const wheel = rl.getMouseWheelMove();
@@ -414,14 +473,14 @@ pub fn main() anyerror!void {
                 render_state.reset_histogram();
             }
         }
-        
-        
-        
+
+
+
         // Keyboard Shortcuts
         // Undo: Ctrl + Z
         const ctrl_pressed = rl.isKeyDown(rl.KeyboardKey.left_control) or rl.isKeyDown(rl.KeyboardKey.right_control);
         const shift_pressed = rl.isKeyDown(rl.KeyboardKey.left_shift) or rl.isKeyDown(rl.KeyboardKey.right_shift);
-        
+
         if (ctrl_pressed and rl.isKeyPressed(rl.KeyboardKey.z)) {
             if (shift_pressed) {
                 // Ctrl + Shift + Z -> Redo
@@ -432,7 +491,7 @@ pub fn main() anyerror!void {
                             f.xforms = new_ptr;
                         } else |_| {
                             // Alloc failed, abort redo for now
-                            _ = history.undo(); // Revert internal index? actually undo() moves idx back. 
+                            _ = history.undo(); // Revert internal index? actually undo() moves idx back.
                             // This is tricky. simpler to just not copy if alloc failed.
                             // But we already advanced history index.
                         }
@@ -445,11 +504,11 @@ pub fn main() anyerror!void {
                         f.brightness = restored.brightness;
                         f.vibrancy = restored.vibrancy;
                         render_state.reset_histogram();
-                        
+
                         gamma = f.gamma;
                         brightness = f.brightness;
                         vibrancy = f.vibrancy;
-                        
+
                         // Fix selection if out of bounds
                         if (selected_xform >= f.xforms.len) {
                             selected_xform = @as(i32, @intCast(f.xforms.len - 1));
@@ -475,7 +534,7 @@ pub fn main() anyerror!void {
                         f.brightness = restored.brightness;
                         f.vibrancy = restored.vibrancy;
                         render_state.reset_histogram();
-                        
+
                         gamma = f.gamma;
                         brightness = f.brightness;
                         vibrancy = f.vibrancy;
@@ -488,7 +547,7 @@ pub fn main() anyerror!void {
                 }
             }
         }
-        
+
         // Ctrl + Y -> Redo
         if (ctrl_pressed and rl.isKeyPressed(rl.KeyboardKey.y)) {
              if (history.redo()) |restored| {
@@ -508,11 +567,11 @@ pub fn main() anyerror!void {
                     f.brightness = restored.brightness;
                     f.vibrancy = restored.vibrancy;
                     render_state.reset_histogram();
-                    
+
                     gamma = f.gamma;
                     brightness = f.brightness;
                     vibrancy = f.vibrancy;
-                    
+
                     // Fix selection if out of bounds
                     if (selected_xform >= f.xforms.len) {
                         selected_xform = @as(i32, @intCast(f.xforms.len - 1));
@@ -525,7 +584,7 @@ pub fn main() anyerror!void {
         if (!input_blocked and raw_mouse.x < renderWidth and selected_xform >= 0 and selected_xform < f.xforms.len) {
              const idx = @as(usize, @intCast(selected_xform));
              const xf = &f.xforms[idx];
-             
+
              // Calculate Screen Points
              const O = toScreen(xf.e, xf.f, zoom, rWidthF, rHeightF);
              const X = toScreen(xf.a + xf.e, xf.b + xf.f, zoom, rWidthF, rHeightF);
@@ -543,7 +602,7 @@ pub fn main() anyerror!void {
                          return dx*dx + dy*dy;
                      }
                  }.dist2;
-                 
+
                  if (d2(mouse_pos, O) < hit_dist * hit_dist) {
                      drag_mode = .DragO;
                      drag_start_mouse = mouse_pos;
@@ -562,18 +621,18 @@ pub fn main() anyerror!void {
                      const line_dx = Y.x - X.x;
                      const line_dy = Y.y - X.y;
                      const line_len_sq = line_dx * line_dx + line_dy * line_dy;
-                     
+
                      if (line_len_sq > 0.0001) { // Avoid division by zero
                          // Project mouse onto line
-                         const t = @max(0.0, @min(1.0, 
+                         const t = @max(0.0, @min(1.0,
                              ((mouse_pos.x - X.x) * line_dx + (mouse_pos.y - X.y) * line_dy) / line_len_sq
                          ));
-                         
+
                          const proj_x = X.x + t * line_dx;
                          const proj_y = X.y + t * line_dy;
-                         const dist_sq = (mouse_pos.x - proj_x) * (mouse_pos.x - proj_x) + 
+                         const dist_sq = (mouse_pos.x - proj_x) * (mouse_pos.x - proj_x) +
                                         (mouse_pos.y - proj_y) * (mouse_pos.y - proj_y);
-                         
+
                      if (dist_sq < hit_dist * hit_dist) {
                          drag_mode = .DragScale;
                          drag_start_mouse = mouse_pos;
@@ -604,7 +663,7 @@ pub fn main() anyerror!void {
              }
              }
         }
-        
+
         // Mouse Release - always check if we're dragging
         if (rl.isMouseButtonReleased(rl.MouseButton.left) or rl.isMouseButtonReleased(rl.MouseButton.right)) {
             if (drag_mode != .None) {
@@ -620,11 +679,11 @@ pub fn main() anyerror!void {
         if (drag_mode != .None and selected_xform >= 0 and selected_xform < f.xforms.len) {
             const idx = @as(usize, @intCast(selected_xform));
             var xf = &f.xforms[idx];
-            
+
             // Calculate Delta in World Space
             const mw = toWorld(mouse_pos.x, mouse_pos.y, zoom, rWidthF, rHeightF);
             const smw = toWorld(drag_start_mouse.x, drag_start_mouse.y, zoom, rWidthF, rHeightF);
-            
+
             const dx = mw.x - smw.x;
             const dy = mw.y - smw.y;
 
@@ -647,7 +706,7 @@ pub fn main() anyerror!void {
                     const total_dy = drag_start_mouse.y - mouse_pos.y; // Inverted: up is positive
                     const scale_factor = 1.0 + (total_dy * 0.005); // 0.5% per pixel
                     const clamped_scale = @max(0.1, @min(10.0, scale_factor));
-                    
+
                     // Apply absolute scale to original coefficients
                     xf.a = drag_original_a * clamped_scale;
                     xf.b = drag_original_b * clamped_scale;
@@ -665,23 +724,23 @@ pub fn main() anyerror!void {
                     xf.b = drag_original_b;
                     xf.c = drag_original_c;
                     xf.d = drag_original_d;
-                    
+
                     // Apply rotation
                     xf.rotate(angle_delta);
                 },
                 .None => {},
             }
-            
+
             // Reset histogram on change
             render_state.reset_histogram();
         }
-        
+
         for (f.xforms, 0..) |xf, i| {
             const is_selected = (i == @as(usize, @intCast(selected_xform)));
             const color = if (is_selected) rl.Color.red else rl.Color.gray;
             const alpha: u8 = if (is_selected) 255 else 100;
             const draw_color = rl.Color.init(color.r, color.g, color.b, alpha);
-            
+
             // Triangle Points
             // Origin (e, f)
             const O = toScreen(xf.e, xf.f, zoom, rWidthF, rHeightF);
@@ -689,7 +748,7 @@ pub fn main() anyerror!void {
             const X = toScreen(xf.a + xf.e, xf.b + xf.f, zoom, rWidthF, rHeightF);
             // Y-Tip (c+e, d+f)
             const Y = toScreen(xf.c + xf.e, xf.d + xf.f, zoom, rWidthF, rHeightF);
-            
+
             // Adjust for menu offset when drawing
             var O_draw = O;
             var X_draw = X;
@@ -697,11 +756,11 @@ pub fn main() anyerror!void {
             O_draw.y += MENU_HEIGHT;
             X_draw.y += MENU_HEIGHT;
             Y_draw.y += MENU_HEIGHT;
-            
+
             // Draw Axis Lines
             rl.drawLineEx(O_draw, X_draw, 2.0, draw_color);
             rl.drawLineEx(O_draw, Y_draw, 2.0, draw_color);
-            
+
             // Draw Triangle Connection (optional, helps see the shape)
             rl.drawLineEx(X_draw, Y_draw, 1.0, rl.Color.init(draw_color.r, draw_color.g, draw_color.b, @divTrunc(alpha, 2)));
 
@@ -709,7 +768,7 @@ pub fn main() anyerror!void {
             rl.drawCircleV(O_draw, 4.0, draw_color); // Origin
             rl.drawCircleV(X_draw, 3.0, draw_color); // X
             rl.drawCircleV(Y_draw, 3.0, draw_color); // Y
-            
+
             if (is_selected) {
                  rl.drawText("O", @as(i32, @intFromFloat(O_draw.x)) + 5, @as(i32, @intFromFloat(O_draw.y)) + 5, 10, rl.Color.white);
                  rl.drawText("X", @as(i32, @intFromFloat(X_draw.x)) + 5, @as(i32, @intFromFloat(X_draw.y)) + 5, 10, rl.Color.white);
@@ -724,13 +783,13 @@ pub fn main() anyerror!void {
         const guiWidth = screenWidth - renderWidth;
         rl.drawRectangle(@intFromFloat(renderWidth), 0, guiWidth, screenHeight, rl.Color.light_gray);
         _ = rg.panel(rl.Rectangle.init(renderWidth, 0, @floatFromInt(guiWidth), @as(f32, @floatFromInt(screenHeight))), "Editor Controls");
-        
+
         // Vertical tabs on left side
         const tabWidth: f32 = 90.0;
         const tabHeight: f32 = 40.0;
         const panelX: f32 = @floatFromInt(renderWidth);
         var tabY: f32 = MENU_HEIGHT + 10.0;
-        
+
         // Fractal tab
         const fractal_active = (active_tab == .Fractal);
         const fractal_text = if (fractal_active) "#Fractal#" else "Fractal";
@@ -739,7 +798,7 @@ pub fn main() anyerror!void {
             xform_dropdown_edit_mode = false;
         }
         tabY += tabHeight + 5;
-        
+
         // Transform tab
         const transform_active = (active_tab == .Transform);
         const transform_text = if (transform_active) "#Transform#" else "Transform";
@@ -747,7 +806,7 @@ pub fn main() anyerror!void {
             active_tab = .Transform;
             xform_dropdown_edit_mode = false;
         }
-        
+
         // Color tab
         tabY += tabHeight + 5;
         const color_active = (active_tab == .Color);
@@ -756,38 +815,47 @@ pub fn main() anyerror!void {
             active_tab = .Color;
             xform_dropdown_edit_mode = false;
         }
-        
+
         // Content area (to the right of tabs)
         // Increased space for labels
         const contentX: f32 = panelX + tabWidth + 110.0;
         var cy: f32 = MENU_HEIGHT + 20.0;
         var global_control_id: i32 = 1000;
-        
+
         // Draw content based on active tab
         switch (active_tab) {
             .Fractal => {
                 // Global fractal settings
                 _ = rg.label(rl.Rectangle.init(contentX, cy, 100, 20), "Fractal Settings");
                 cy += 30;
-                
-                global_control_id += 1;
-                drawFloatControl(rl.Rectangle.init(contentX, cy, 250, 20), "Iterations/Frame", &iterations_per_frame, 1000, 100000, &active_edit_id, global_control_id, &edit_buffer);
+
+                if (drawFloatControl(rl.Rectangle.init(contentX, cy, 250, 20), "Iterations/Frame", &iterations_per_frame, 1000, 100000, &active_edit_id, global_control_id, &edit_buffer)) {
+                    // No reset needed for iterations
+                }
                 cy += 40;
 
                 global_control_id += 1;
-                drawFloatControl(rl.Rectangle.init(contentX, cy, 250, 20), "Zoom", &zoom, 10, 200, &active_edit_id, global_control_id, &edit_buffer);
+                if (drawFloatControl(rl.Rectangle.init(contentX, cy, 250, 20), "Zoom", &zoom, 10, 200, &active_edit_id, global_control_id, &edit_buffer)) {
+                    render_state.reset_histogram();
+                }
                 cy += 40;
 
                 global_control_id += 1;
-                drawFloatControl(rl.Rectangle.init(contentX, cy, 250, 20), "Gamma", &gamma, 0.1, 5.0, &active_edit_id, global_control_id, &edit_buffer);
+                if (drawFloatControl(rl.Rectangle.init(contentX, cy, 250, 20), "Gamma", &gamma, 0.1, 5.0, &active_edit_id, global_control_id, &edit_buffer)) {
+                    // Texture update is automatic
+                }
                 cy += 40;
 
                 global_control_id += 1;
-                drawFloatControl(rl.Rectangle.init(contentX, cy, 250, 20), "Brightness", &brightness, 0.1, 10.0, &active_edit_id, global_control_id, &edit_buffer);
+                if (drawFloatControl(rl.Rectangle.init(contentX, cy, 250, 20), "Brightness", &brightness, 0.1, 10.0, &active_edit_id, global_control_id, &edit_buffer)) {
+                    // Texture update is automatic
+                }
                 cy += 40;
 
                 global_control_id += 1;
-                drawFloatControl(rl.Rectangle.init(contentX, cy, 250, 20), "Vibrancy", &vibrancy, 0.0, 2.0, &active_edit_id, global_control_id, &edit_buffer);
+                if (drawFloatControl(rl.Rectangle.init(contentX, cy, 250, 20), "Vibrancy", &vibrancy, 0.0, 2.0, &active_edit_id, global_control_id, &edit_buffer)) {
+                    // Texture update is automatic
+                }
                 cy += 40;
 
                 _ = rg.checkBox(rl.Rectangle.init(contentX, cy, 20, 20), "GPU Enabled", &render_state.gpu_enabled);
@@ -801,7 +869,7 @@ pub fn main() anyerror!void {
                 // Transform editor
                 _ = rg.label(rl.Rectangle.init(contentX, cy, 100, 20), "Transform Editor");
                 cy += 25;
-                
+
                 // Construct dropdown string: "T0;T1;T2..."
                 var xform_list_str: [512]u8 = undefined;
                 var list_offset: usize = 0;
@@ -816,7 +884,7 @@ pub fn main() anyerror!void {
                 xform_list_str[list_offset] = 0;
                 const list_sentinel: [:0]const u8 = xform_list_str[0..list_offset :0];
                 const dropdown_rect = rl.Rectangle.init(contentX, cy, 150, 20);
-                
+
                 // Add/Delete Buttons
                 // [Dropdown] [ + ] [ - ]
                 if (rg.button(rl.Rectangle.init(contentX + 160, cy, 30, 20), "+")) {
@@ -835,28 +903,28 @@ pub fn main() anyerror!void {
                          // alloc failed
                     }
                 }
-                
+
                 if (rg.button(rl.Rectangle.init(contentX + 195, cy, 30, 20), "-")) {
                     // Delete Transform (if > 1)
                     if (f.xforms.len > 1) {
                          const current_idx = @as(usize, @intCast(selected_xform));
-                         
+
                          // Create new slice
                          if (allocator.alloc(flame.Xform, f.xforms.len - 1)) |new_arr| {
                              // Copy before
                              @memcpy(new_arr[0..current_idx], f.xforms[0..current_idx]);
                              // Copy after
                              @memcpy(new_arr[current_idx..], f.xforms[current_idx+1..]);
-                             
+
                              // Free old
                              allocator.free(f.xforms);
                              f.xforms = new_arr;
-                             
+
                              // Update selection
                              if (current_idx >= f.xforms.len) {
                                  selected_xform = @as(i32, @intCast(f.xforms.len - 1));
                              }
-                             
+
                              history.push(f) catch {};
                              render_state.reset_histogram();
                          } else |_| {
@@ -864,9 +932,9 @@ pub fn main() anyerror!void {
                          }
                     }
                 }
-                
+
                 cy += 35; // Reserve space for it
-                
+
                 // If dropdown is open, DISABLE underlying controls
                 if (xform_dropdown_edit_mode) rg.lock();
 
@@ -878,19 +946,38 @@ pub fn main() anyerror!void {
                     _ = rg.label(rl.Rectangle.init(contentX, cy, 100, 20), "Affine");
                     cy += 25;
 
-                    control_id += 1;
-                    drawFloatControl(rl.Rectangle.init(contentX, cy, 250, 20), "X", &xf.e, -100.0, 100.0, &active_edit_id, control_id, &edit_buffer);
-                    cy += 25;
-                    
-                    control_id += 1;
-                    drawFloatControl(rl.Rectangle.init(contentX, cy, 250, 20), "Y", &xf.f, -100.0, 100.0, &active_edit_id, control_id, &edit_buffer);
-                    cy += 25;
-                    
-                    cy += 25;
-                    
-                    // Movement Control (Step + Arrows) moved up
-                    control_id += 1;
-                    drawFloatControl(rl.Rectangle.init(contentX, cy, 250, 20), "Step", &move_step, 0.001, 1.0, &active_edit_id, control_id, &edit_buffer);
+                     _ = rg.label(rl.Rectangle.init(contentX, cy, 30, 20), "X");
+                     control_id += 1;
+                     if (drawFloatControl(rl.Rectangle.init(contentX + 30, cy, 220, 20), "", &xf.e, -100.0, 100.0, &active_edit_id, control_id, &edit_buffer)) {
+                         render_state.reset_histogram();
+                     }
+                     cy += 25;
+
+                     _ = rg.label(rl.Rectangle.init(contentX, cy, 30, 20), "Y");
+                     control_id += 1;
+                     if (drawFloatControl(rl.Rectangle.init(contentX + 30, cy, 220, 20), "", &xf.f, -100.0, 100.0, &active_edit_id, control_id, &edit_buffer)) {
+                         render_state.reset_histogram();
+                     }
+                     cy += 25;
+
+                     _ = rg.label(rl.Rectangle.init(contentX, cy, 50, 20), "Weight");
+                     control_id += 1;
+                     if (drawFloatControl(rl.Rectangle.init(contentX + 50, cy, 200, 20), "", &xf.weight, 0.0, 100.0, &active_edit_id, control_id, &edit_buffer)) {
+                         render_state.reset_histogram();
+                     }
+                     cy += 25;
+
+                     _ = rg.label(rl.Rectangle.init(contentX, cy, 50, 20), "Color");
+                     control_id += 1;
+                     if (drawFloatControl(rl.Rectangle.init(contentX + 50, cy, 200, 20), "", &xf.color, 0.0, 1.0, &active_edit_id, control_id, &edit_buffer)) {
+                         render_state.reset_histogram();
+                     }
+                     cy += 30;
+
+                     // Movement Control (Step + Arrows) moved up
+                     _ = rg.label(rl.Rectangle.init(contentX, cy, 50, 20), "Step");
+                     control_id += 1;
+                     _ = drawFloatControl(rl.Rectangle.init(contentX + 50, cy, 200, 20), "", &move_step, 0.001, 1.0, &active_edit_id, control_id, &edit_buffer);
                     cy += 30;
 
                     const arrow_w = 60.0;
@@ -899,11 +986,11 @@ pub fn main() anyerror!void {
 
                     // Up
                     if (rg.button(rl.Rectangle.init(arrow_cx + arrow_w, cy, arrow_w, arrow_h), "Up")) {
-                        xf.f += move_step; 
+                        xf.f += move_step;
                         render_state.reset_histogram(); history.push(f) catch {};
                     }
                     cy += 30;
-                    
+
                     // Left, Down, Right
                     if (rg.button(rl.Rectangle.init(arrow_cx, cy, arrow_w, arrow_h), "Left")) {
                         xf.e -= move_step;
@@ -919,14 +1006,15 @@ pub fn main() anyerror!void {
                     }
                     cy += 35;
 
-                    // Scale control moved down below movement
-                    const current_scale_calc = @sqrt(xf.a * xf.a + xf.b * xf.b + xf.c * xf.c + xf.d * xf.d) / 1.414;
-                    var current_scale = current_scale_calc;
-                    const old_scale_val = current_scale;
-                    
-                    control_id += 1;
-                    drawFloatControl(rl.Rectangle.init(contentX, cy, 250, 20), "Scale", &current_scale, 0.1, 50.0, &active_edit_id, control_id, &edit_buffer);
-                    
+                     // Scale control moved down below movement
+                     const current_scale_calc = @sqrt(xf.a * xf.a + xf.b * xf.b + xf.c * xf.c + xf.d * xf.d) / 1.414;
+                     var current_scale = current_scale_calc;
+                     const old_scale_val = current_scale;
+
+                     _ = rg.label(rl.Rectangle.init(contentX, cy, 50, 20), "Scale");
+                     control_id += 1;
+                     _ = drawFloatControl(rl.Rectangle.init(contentX + 50, cy, 200, 20), "", &current_scale, 0.1, 50.0, &active_edit_id, control_id, &edit_buffer);
+
                     if (@abs(current_scale - old_scale_val) > 0.001 and old_scale_val > 0.001) {
                         const scale_ratio = current_scale / old_scale_val;
                         xf.a *= scale_ratio;
@@ -941,15 +1029,15 @@ pub fn main() anyerror!void {
                     // Rotation Control
                     _ = rg.label(rl.Rectangle.init(contentX, cy, 100, 20), "Rotation");
                     cy += 25;
-                    
-                    // Calculate current angle from A/B components
-                    // Angle is atan2(b, a) assuming uniform scale/no shear, but good approximation for UI
-                    const current_angle_rad = std.math.atan2(xf.b, xf.a);
-                    var current_angle_deg = current_angle_rad * 180.0 / std.math.pi;
-                    const old_angle_deg = current_angle_deg;
+                                        // Calculate current angle from A/B components
+                     // Angle is atan2(b, a) assuming uniform scale/no shear, but good approximation for UI
+                     const current_angle_rad = std.math.atan2(xf.b, xf.a);
+                     var current_angle_deg = current_angle_rad * 180.0 / std.math.pi;
+                     const old_angle_deg = current_angle_deg;
 
-                    control_id += 1;
-                    drawFloatControl(rl.Rectangle.init(contentX, cy, 250, 20), "Angle", &current_angle_deg, -180.0, 180.0, &active_edit_id, control_id, &edit_buffer);
+                     _ = rg.label(rl.Rectangle.init(contentX, cy, 50, 20), "Angle");
+                     control_id += 1;
+                     _ = drawFloatControl(rl.Rectangle.init(contentX + 50, cy, 200, 20), "", &current_angle_deg, -180.0, 180.0, &active_edit_id, control_id, &edit_buffer);
                     cy += 30;
 
                     if (@abs(current_angle_deg - old_angle_deg) > 0.01) {
@@ -961,11 +1049,11 @@ pub fn main() anyerror!void {
 
                     // Preset Rotation Buttons
                     // const btn_w = 40.0; // Unused
-                    // Layout: 
+                    // Layout:
                     // [ -180 ] [ -90  ] [ -45  ] [ +45  ] [ +90  ] [ +180 ] -> too wide?
                     // Row 1: -45 +45  -90 +90
                     // Row 2: -180 +180 -5 +5
-                    
+
                     if (rg.button(rl.Rectangle.init(contentX, cy, 50, 20), "-45")) {
                          xf.rotate(-45.0); render_state.reset_histogram(); history.push(f) catch {};
                     }
@@ -995,29 +1083,137 @@ pub fn main() anyerror!void {
                     cy += 30;
 
 
-                    // Variations (Existing)
+                    // Variation Explorer
                     _ = rg.label(rl.Rectangle.init(contentX, cy, 100, 20), "Variations");
                     cy += 25;
 
-                    control_id += 1;
-                    drawFloatControl(rl.Rectangle.init(contentX, cy, 250, 20), "Lin", &xf.linear, -5.0, 5.0, &active_edit_id, control_id, &edit_buffer);
+                    // Search Bar
+                    _ = rg.label(rl.Rectangle.init(contentX, cy, 35, 20), "Find:");
+                    if (rg.textBox(rl.Rectangle.init(contentX + 40, cy, 110, 20), &variation_search_buf, 32, active_edit_id == -99)) {
+                         active_edit_id = if (active_edit_id == -99) -1 else -99;
+                    }
+                    _ = rg.checkBox(rl.Rectangle.init(contentX + 160, cy, 20, 20), "Active only", &show_only_active_variations);
                     cy += 25;
 
-                    control_id += 1;
-                    drawFloatControl(rl.Rectangle.init(contentX, cy, 250, 20), "Sin", &xf.sinusoidal, -5.0, 5.0, &active_edit_id, control_id, &edit_buffer);
-                    cy += 25;
+                    const VarMeta = struct { label: [:0]const u8, field: []const u8 };
+                    const variations_list = comptime [_]VarMeta{
+                        .{ .label = "Linear", .field = "linear" },
+                        .{ .label = "Sinusoidal", .field = "sinusoidal" },
+                        .{ .label = "Spherical", .field = "spherical" },
+                        .{ .label = "Swirl", .field = "swirl" },
+                        .{ .label = "Horseshoe", .field = "horseshoe" },
+                        .{ .label = "Polar", .field = "polar" },
+                        .{ .label = "Handkerchief", .field = "handkerchief" },
+                        .{ .label = "Heart", .field = "heart" },
+                        .{ .label = "Disc", .field = "disc" },
+                        .{ .label = "Spiral", .field = "spiral" },
+                        .{ .label = "Hyperbolic", .field = "hyperbolic" },
+                        .{ .label = "Diamond", .field = "diamond" },
+                        .{ .label = "Ex", .field = "ex" },
+                        .{ .label = "Julia", .field = "julia" },
+                        .{ .label = "Bent", .field = "bent" },
+                        .{ .label = "Waves", .field = "waves" },
+                        .{ .label = "Fisheye", .field = "fisheye" },
+                        .{ .label = "Popcorn", .field = "popcorn" },
+                        .{ .label = "Exponential", .field = "exponential" },
+                        .{ .label = "Power", .field = "power" },
+                        .{ .label = "Cosine", .field = "cosine" },
+                        .{ .label = "Rings", .field = "rings" },
+                        .{ .label = "Fan", .field = "fan" },
+                        .{ .label = "Eyefish", .field = "eyefish" },
+                        .{ .label = "Bubble", .field = "bubble" },
+                        .{ .label = "Cylinder", .field = "cylinder" },
+                        .{ .label = "Noise", .field = "noise" },
+                        .{ .label = "Blur", .field = "blur" },
+                        .{ .label = "Gaussian Blur", .field = "gaussian_blur" },
+                        .{ .label = "Radial Blur", .field = "radial_blur" },
+                        .{ .label = "Pie", .field = "pie" },
+                        .{ .label = "Ngon", .field = "ngon" },
+                        .{ .label = "Curl", .field = "curl" },
+                        .{ .label = "Rectangles", .field = "rectangles" },
+                        .{ .label = "Tangent", .field = "tangent" },
+                        .{ .label = "Square", .field = "square" },
+                        .{ .label = "Rays", .field = "rays" },
+                        .{ .label = "Blade", .field = "blade" },
+                        .{ .label = "Secant", .field = "secant" },
+                        .{ .label = "Twintrian", .field = "twintrian" },
+                        .{ .label = "Cross", .field = "cross" },
+                        .{ .label = "Julian", .field = "julian" },
+                    };
 
-                    control_id += 1;
-                    drawFloatControl(rl.Rectangle.init(contentX, cy, 250, 20), "Sph", &xf.spherical, -5.0, 5.0, &active_edit_id, control_id, &edit_buffer);
-                    cy += 25;
+                    const panel_bounds = rl.Rectangle.init(contentX, cy, 270, 400);
+                    const item_height = 25.0;
 
-                    control_id += 1;
-                    drawFloatControl(rl.Rectangle.init(contentX, cy, 250, 20), "Swrl", &xf.swirl, -5.0, 5.0, &active_edit_id, control_id, &edit_buffer);
-                    cy += 25;
+                    const search_str = std.mem.span(@as([*:0]u8, @ptrCast(&variation_search_buf)));
 
-                    control_id += 1;
-                    drawFloatControl(rl.Rectangle.init(contentX, cy, 250, 20), "Horse", &xf.horseshoe, -5.0, 5.0, &active_edit_id, control_id, &edit_buffer);
-                    cy += 25;
+                    var filtered_count: usize = 0;
+                    inline for (variations_list) |v| {
+                        const ptr = &@field(xf, v.field);
+                        const is_active = (ptr.* != 0.0);
+                        const matches_search = (search_str.len == 0 or containsIgnoreCase(v.label, search_str));
+                        const matches_active = (!show_only_active_variations or is_active);
+
+                        if (matches_search and matches_active) {
+                            filtered_count += 1;
+                        }
+                    }
+
+                    var view = rl.Rectangle{ .x = 0, .y = 0, .width = 0, .height = 0 };
+                    _ = rg.scrollPanel(panel_bounds, null, rl.Rectangle.init(0, 0, 250, @as(f32, @floatFromInt(filtered_count)) * item_height), &variation_scroll, &view);
+
+                    rl.beginScissorMode(@intCast(@as(i32, @intFromFloat(view.x))), @intCast(@as(i32, @intFromFloat(view.y))), @intCast(@as(i32, @intFromFloat(view.width))), @intCast(@as(i32, @intFromFloat(view.height))));
+
+                    var scroll_vy = view.y + variation_scroll.y;
+                    inline for (variations_list, 0..) |v, i| {
+                        const ptr = &@field(xf, v.field);
+                        const is_active = (ptr.* != 0.0);
+                        const matches_search = (search_str.len == 0 or containsIgnoreCase(v.label, search_str));
+                        const matches_active = (!show_only_active_variations or is_active);
+
+                        if (matches_search and matches_active) {
+                             if (ptr.* != 0.0) {
+                                 rl.drawRectangleRec(rl.Rectangle.init(panel_bounds.x, scroll_vy, panel_bounds.width - 15, item_height - 2), rl.fade(rl.Color.sky_blue, 0.3));
+                            }
+
+                            _ = rg.label(rl.Rectangle.init(view.x + 5, scroll_vy, 90, 20), v.label);
+                            if (drawFloatControl(rl.Rectangle.init(view.x + 100, scroll_vy, 130, 20), "", ptr, -5.0, 5.0, &active_edit_id, 1000 + @as(i32, @intCast(i)), &edit_buffer)) {
+                                render_state.reset_histogram();
+                            }
+
+                            scroll_vy += item_height;
+                        }
+                    }
+                    rl.endScissorMode();
+
+                    cy += 410;
+
+                    // --- VARIATION VARIABLES SECTION ---
+                    // Dynamically show controls for active variations that have parameters
+                    var has_vars = false;
+                    if (xf.julian != 0.0) has_vars = true;
+
+                    if (has_vars) {
+                        _ = rg.label(rl.Rectangle.init(contentX, cy, 100, 20), "Variables");
+                        cy += 25;
+
+                        // Julian Params
+                        if (xf.julian != 0.0) {
+                            _ = rg.label(rl.Rectangle.init(contentX, cy, 100, 20), "Julian");
+                            cy += 20;
+
+                            _ = rg.label(rl.Rectangle.init(contentX, cy, 50, 20), "Power");
+                            if (drawFloatControl(rl.Rectangle.init(contentX + 50, cy, 200, 20), "", &xf.julian_power, -10.0, 10.0, &active_edit_id, 2001, &edit_buffer)) {
+                                render_state.reset_histogram();
+                            }
+                            cy += 25;
+
+                            _ = rg.label(rl.Rectangle.init(contentX, cy, 50, 20), "Dist");
+                            if (drawFloatControl(rl.Rectangle.init(contentX + 50, cy, 200, 20), "", &xf.julian_dist, -5.0, 5.0, &active_edit_id, 2002, &edit_buffer)) {
+                                render_state.reset_histogram();
+                            }
+                            cy += 30;
+                        }
+                    }
                 }
 
                 // NOW draw the dropdown on top
@@ -1035,25 +1231,25 @@ pub fn main() anyerror!void {
                 // const marker_y_start = cy + 40; // Unused
 
                 const controls_y_start = cy + 70; // 40 (grad) + 10 (padding) + 20 (markers)
-                
+
                 // We'll draw gradient and markers at the END of this block
                 // so they reflect the latest baked state from the controls below.
-                
+
                 const grad_draw_y = cy;
                 const marker_draw_y = cy + 50;
-                
+
                 cy = controls_y_start;
 
                 // (Logic for node markers moved to end)
                 cy += 20;
-                
+
 
 
                 // Node controls
                 if (f.palette.num_nodes > 0) {
                     const idx = @as(usize, @intCast(@max(0, @min(f.palette.num_nodes - 1, @as(u32, @intCast(selected_color_node))))));
                     var node = &f.palette.nodes[idx];
-                    
+
                     // Smart Sync (History Based):
                     // Only update picker if selection changed OR history changed (Undo/Redo/External)
                     const selection_changed = (selected_color_node != last_color_node_idx);
@@ -1074,15 +1270,15 @@ pub fn main() anyerror!void {
 
                     const prev_picker_color = picker_color_rl;
                     _ = rg.colorPicker(rl.Rectangle.init(contentX, cy, 200, 200), "", &picker_color_rl);
-                    
-                    const picker_changed = (picker_color_rl.r != prev_picker_color.r or 
-                                          picker_color_rl.g != prev_picker_color.g or 
+
+                    const picker_changed = (picker_color_rl.r != prev_picker_color.r or
+                                          picker_color_rl.g != prev_picker_color.g or
                                           picker_color_rl.b != prev_picker_color.b);
 
                     if (picker_changed) {
                         node.color = rlToFlameColor(picker_color_rl);
                         node.color.a = 1.0;
-                        
+
                         f.palette.bake(&selected_color_node);
                         render_state.upload_palette(f.palette.colors[0..]);
                     }
@@ -1094,7 +1290,7 @@ pub fn main() anyerror!void {
 
                 // --- POST-UPDATE DRAWING ---
                 // Now draw the gradient and markers using the potentially updated palette
-                
+
                 // 1. Gradient Strip
                 const gradRect = rl.Rectangle.init(contentX, grad_draw_y, gradWidth, 40);
                 for (0..256) |i| {
@@ -1126,19 +1322,19 @@ pub fn main() anyerror!void {
                     const node = f.palette.nodes[i];
                     const nx = contentX + node.pos * (gradWidth - 1.0);
                     const is_sel = (@as(i32, @intCast(i)) == selected_color_node);
-                    
+
                     // Use actual node color for the marker fill
                     const node_c = flameToRlColor(node.color);
 
                     const border_color = if (is_sel) rl.Color.white else rl.Color.dark_gray;
-                    
+
                     const v1 = rl.Vector2.init(nx, marker_draw_y);
                     const v2 = rl.Vector2.init(nx - 6, marker_draw_y + 12);
                     const v3 = rl.Vector2.init(nx + 6, marker_draw_y + 12);
 
                     rl.drawTriangle(v1, v2, v3, node_c);
                     rl.drawTriangleLines(v1, v2, v3, border_color);
-                    
+
                     // Click to select logic (can remain here)
                     if (rl.isMouseButtonPressed(rl.MouseButton.left)) {
                         const m = rl.getMousePosition();
@@ -1152,9 +1348,9 @@ pub fn main() anyerror!void {
                 if (f.palette.num_nodes < colors.MAX_NODES) {
                     if (rg.button(rl.Rectangle.init(contentX, cy, 100, 30), "Add Node")) {
                         const new_idx = f.palette.num_nodes;
-                        f.palette.nodes[new_idx] = colors.ColorNode{ 
-                            .pos = 0.5, 
-                            .color = colors.Color{ .r = 1, .g = 1, .b = 1 } 
+                        f.palette.nodes[new_idx] = colors.ColorNode{
+                            .pos = 0.5,
+                            .color = colors.Color{ .r = 1, .g = 1, .b = 1 }
                         };
                         f.palette.num_nodes += 1;
                         f.palette.bake(&selected_color_node);
@@ -1180,9 +1376,24 @@ pub fn main() anyerror!void {
                 }
                 cy += 40;
 
-                // Browse Gradients button
-                if (rg.button(rl.Rectangle.init(contentX, cy, 200, 25), "Browse Gradients...")) {
+                // Browse Gradients and Smooth Palette
+                if (rg.button(rl.Rectangle.init(contentX, cy, 220, 25), "Browse Gradients...")) {
                     show_gradient_browser = true;
+                }
+                cy += 35;
+                _ = rg.label(rl.Rectangle.init(contentX, cy, 220, 25), "Palette Extraction");
+                cy += 30;
+                if (rg.button(rl.Rectangle.init(contentX, cy, 220, 25), "Smooth Palette...")) {
+                    img_browser.is_active = true;
+                }
+                cy += 35;
+                // Reduce Palette button
+                if (rg.button(rl.Rectangle.init(contentX, cy, 220, 25), "Reduce Palette")) {
+                    f.palette.reducePalette(allocator, 10);
+                    selected_color_node = @min(selected_color_node, @as(i32, @intCast(f.palette.num_nodes - 1)));
+                    render_state.upload_palette(f.palette.colors[0..]);
+                    render_state.reset_histogram();
+                    history.push(f) catch {};
                 }
                 cy += 35;
             },
@@ -1194,28 +1405,28 @@ pub fn main() anyerror!void {
             // Background
             rl.drawRectangle(0, 0, screenWidth, @intFromFloat(MENU_HEIGHT), rl.Color.light_gray);
             rl.drawLine(0, @intFromFloat(MENU_HEIGHT), screenWidth, @intFromFloat(MENU_HEIGHT), rl.Color.gray);
-            
+
             // "File" Button
             if (rg.button(rl.Rectangle.init(0, 0, 60, MENU_HEIGHT), "File")) {
                 file_menu_open = !file_menu_open;
             }
-            
+
             // "Edit" Button
             if (rg.button(rl.Rectangle.init(60, 0, 60, MENU_HEIGHT), "Edit")) {
                 edit_menu_open = !edit_menu_open;
                 file_menu_open = false; // Close other menus
             }
-            
+
             // Draw Menu Dropdown if open
             if (file_menu_open) {
                 const item_height = 24.0;
                 const menu_width = 120.0;
                 const base_y = MENU_HEIGHT;
-                
+
                 // Background for menu
                 rl.drawRectangle(0, @intFromFloat(base_y), @intFromFloat(menu_width), @intFromFloat(item_height * 3.0), rl.Color.light_gray);
                 rl.drawRectangleLines(0, @intFromFloat(base_y), @intFromFloat(menu_width), @intFromFloat(item_height * 3.0), rl.Color.gray);
-                
+
                 // Menu Items
                 if (rg.button(rl.Rectangle.init(0, base_y, menu_width, item_height), "Open .flamey")) {
                      file_menu_open = false; // Close menu
@@ -1233,14 +1444,14 @@ pub fn main() anyerror!void {
                           std.debug.print("Failed to load: {}\n", .{err});
                      }
                 }
-                
+
                 if (rg.button(rl.Rectangle.init(0, base_y + item_height, menu_width, item_height), "Save .flamey")) {
                      file_menu_open = false;
                      io.IO.saveFlam3Yaml("fractal.flamey", f) catch |err| {
                          std.debug.print("Failed to save: {}\n", .{err});
                      };
                 }
-                
+
                 if (rg.button(rl.Rectangle.init(0, base_y + item_height * 2, menu_width, item_height), "Import .flame")) {
                      file_menu_open = false;
                      if (io.IO.loadLegacyFlameXml(allocator, "fractal.flame")) |loaded_f| {
@@ -1257,7 +1468,7 @@ pub fn main() anyerror!void {
                           std.debug.print("Failed to load .flame: {}\n", .{err});
                      }
                 }
-                
+
                 // Click outside to close
                 if (rl.isMouseButtonPressed(rl.MouseButton.left)) {
                     const m = rl.getMousePosition();
@@ -1268,23 +1479,23 @@ pub fn main() anyerror!void {
                          }
                     } else {
                         // In menu bar. If NOT file button (0..60), close?
-                        // "Edit" button logic might interfere. 
+                        // "Edit" button logic might interfere.
                         // Let's just say: If you click outside the dropdown, close it.
                         if (m.x > menu_width) file_menu_open = false;
                     }
                 }
             }
-            
+
             // Edit Menu Dropdown
             if (edit_menu_open) {
                 const i_height = 24.0;
                 const m_width = 170.0;
                 const b_y = MENU_HEIGHT;
-                
+
                 // Background
                 rl.drawRectangle(60, @intFromFloat(b_y), @intFromFloat(m_width), @intFromFloat(i_height * 4.0), rl.Color.light_gray);
                 rl.drawRectangleLines(60, @intFromFloat(b_y), @intFromFloat(m_width), @intFromFloat(i_height * 4.0), rl.Color.gray);
-                
+
                 // Undo
                 const can_undo = history.canUndo();
                 rg.setState(if (can_undo) 0 else 1);
@@ -1299,7 +1510,7 @@ pub fn main() anyerror!void {
                     }
                 }
                 rg.setState(0);
-                
+
                 // Redo
                 const can_redo = history.canRedo();
                 rg.setState(if (can_redo) 0 else 1);
@@ -1314,7 +1525,7 @@ pub fn main() anyerror!void {
                     }
                 }
                 rg.setState(0);
-                
+
                 // Add Transform
                 if (rg.button(rl.Rectangle.init(60, b_y + i_height * 2, m_width, i_height), "Add Transform")) {
                     const new_xforms = allocator.alloc(flame.Xform, f.xforms.len + 1) catch blk: {
@@ -1331,7 +1542,7 @@ pub fn main() anyerror!void {
                     }
                     edit_menu_open = false;
                 }
-                
+
                 // Delete Transform
                 const can_delete = f.xforms.len > 1;
                 rg.setState(if (can_delete) 0 else 1);
@@ -1354,7 +1565,7 @@ pub fn main() anyerror!void {
                     edit_menu_open = false;
                 }
                 rg.setState(0);
-                
+
                 // Click outside to close
                 if (rl.isMouseButtonPressed(rl.MouseButton.left)) {
                     const m = rl.getMousePosition();
@@ -1368,30 +1579,30 @@ pub fn main() anyerror!void {
                 }
             }
         }
-        
+
         // --- GRADIENT BROWSER MODAL WINDOW ---
         if (show_gradient_browser) {
             // Semi-transparent overlay
             rl.drawRectangle(0, 0, screenWidth, screenHeight, rl.Color{.r = 0, .g = 0, .b = 0, .a = 180});
-            
+
             // Modal window
             const modal_width: f32 = 500.0;
             const modal_height: f32 = 600.0;
             const modal_x = (@as(f32, @floatFromInt(screenWidth)) - modal_width) / 2.0;
             const modal_y = (@as(f32, @floatFromInt(screenHeight)) - modal_height) / 2.0;
-            
+
             rl.drawRectangle(@intFromFloat(modal_x), @intFromFloat(modal_y), @intFromFloat(modal_width), @intFromFloat(modal_height), rl.Color.light_gray);
             _ = rg.panel(rl.Rectangle.init(modal_x, modal_y, modal_width, modal_height), "Gradient Library");
-            
+
             var modal_cy = modal_y + 30;
             const btn_height: f32 = 25;
-            
+
             // Top toolbar: File Path Input
             _ = rg.label(rl.Rectangle.init(modal_x + 10, modal_cy, 50, btn_height), "File:");
             if (rg.textBox(rl.Rectangle.init(modal_x + 50, modal_cy, modal_width - 150, btn_height), gradient_file_path_buf[0..], 256, true)) {
                 // Path edited
             }
-            
+
             if (rg.button(rl.Rectangle.init(modal_x + modal_width - 90, modal_cy, 80, btn_height), "Open")) {
                 const path = std.mem.span(@as([*:0]u8, @ptrCast(&gradient_file_path_buf)));
                 gradient_library.clear();
@@ -1399,13 +1610,13 @@ pub fn main() anyerror!void {
                     std.debug.print("Failed to load {s}: {}\n", .{path, err});
                 };
             }
-            
+
             modal_cy += btn_height + 10;
-            
+
             // Second row: Management buttons
             var btn_x = modal_x + 10;
             const sub_btn_width = (modal_width - 30) / 3;
-            
+
             if (rg.button(rl.Rectangle.init(btn_x, modal_cy, sub_btn_width, btn_height), "Save As...")) {
                 const path = std.mem.span(@as([*:0]u8, @ptrCast(&gradient_file_path_buf)));
                 gradient_library.saveToFile(path) catch |e| {
@@ -1413,7 +1624,7 @@ pub fn main() anyerror!void {
                 };
             }
             btn_x += sub_btn_width + 5;
-            
+
             if (rg.button(rl.Rectangle.init(btn_x, modal_cy, sub_btn_width, btn_height), "Add Current")) {
                 const name_buf = std.fmt.allocPrint(allocator, "New Gradient {d}", .{gradient_library.gradients.items.len + 1}) catch null;
                 if (name_buf) |name| {
@@ -1439,7 +1650,7 @@ pub fn main() anyerror!void {
                 }
             }
             btn_x += sub_btn_width + 5;
-            
+
             const can_delete = (gradient_browser_selected != null);
             rg.setState(if (can_delete) 0 else 1);
             if (rg.button(rl.Rectangle.init(btn_x, modal_cy, sub_btn_width, btn_height), "Remove")) {
@@ -1449,18 +1660,18 @@ pub fn main() anyerror!void {
                 }
             }
             rg.setState(0);
-            
+
             modal_cy += btn_height + 15;
-            
+
             // Gradient gallery (scrollable area)
             const gallery_y = modal_cy;
             const gallery_height = modal_height - (gallery_y - modal_y) - 60; // Leave space for bottom buttons
             const gallery_rect = rl.Rectangle.init(modal_x + 10, gallery_y, modal_width - 20, gallery_height);
-            
+
             // Draw gallery background
             rl.drawRectangleRec(gallery_rect, rl.Color.white);
             rl.drawRectangleLinesEx(gallery_rect, 1, rl.Color.gray);
-            
+
             // Handle scrolling
             const wheel = rl.getMouseWheelMove();
             if (wheel != 0) {
@@ -1471,19 +1682,19 @@ pub fn main() anyerror!void {
             const grad_bar_height: f32 = 25; // Slightly shorter to fit more
             const grad_spacing: f32 = 10;
             const item_height = grad_bar_height + 18 + grad_spacing;
-            
+
             // Clamp scroll
             const total_content_height = @as(f32, @floatFromInt(gradient_library.gradients.items.len)) * item_height;
             gradient_browser_scroll = @max(0.0, @min(gradient_browser_scroll, @max(0.0, total_content_height - gallery_height + 20)));
 
             rl.beginScissorMode(@intFromFloat(gallery_rect.x), @intFromFloat(gallery_rect.y), @intFromFloat(gallery_rect.width), @intFromFloat(gallery_rect.height));
-            
+
             var grad_y = gallery_y + 5 - gradient_browser_scroll;
-            
+
             for (gradient_library.gradients.items, 0..) |entry, i| {
                 const is_selected = if (gradient_browser_selected) |sel| sel == i else false;
                 const bar_rect = rl.Rectangle.init(gallery_rect.x + 5, grad_y, gallery_rect.width - 25, grad_bar_height);
-                
+
                 // Skip if out of view
                 if (grad_y + item_height >= gallery_y and grad_y <= gallery_y + gallery_height) {
                     // Selection highlight
@@ -1493,7 +1704,7 @@ pub fn main() anyerror!void {
                             rl.Color.sky_blue
                         );
                     }
-                    
+
                     // Draw gradient
                     for (0..256) |px| {
                         const x_pos = bar_rect.x + (@as(f32, @floatFromInt(px)) / 255.0) * bar_rect.width;
@@ -1501,7 +1712,7 @@ pub fn main() anyerror!void {
                         const rl_color = flameToRlColor(c);
                         rl.drawRectangle(@intFromFloat(x_pos), @intFromFloat(bar_rect.y), 2, @intFromFloat(bar_rect.height), rl_color);
                     }
-                    
+
                     // Click to select
                     if (rl.isMouseButtonPressed(rl.MouseButton.left)) {
                         const m = rl.getMousePosition();
@@ -1519,37 +1730,37 @@ pub fn main() anyerror!void {
                             gradient_context_menu_idx = i;
                         }
                     }
-                    
+
                     // Draw name label
                     const label_cstr = std.fmt.bufPrintZ(&gradient_file_path_buf, "{s}", .{entry.name}) catch "???";
                     rl.drawText(label_cstr, @intFromFloat(bar_rect.x), @intFromFloat(grad_y + grad_bar_height + 2), 10, rl.Color.black);
                 }
-                
+
                 grad_y += item_height;
             }
             rl.endScissorMode();
 
 
-            
+
             // Bottom buttons
             const bottom_y = modal_y + modal_height - 45;
             const bottom_btn_width: f32 = 120;
-            
+
             if (rg.button(rl.Rectangle.init(modal_x + modal_width - bottom_btn_width - 140, bottom_y, bottom_btn_width, 30), "Cancel")) {
                 show_gradient_browser = false;
                 gradient_browser_selected = null;
                 gradient_context_menu_open = false;
             }
-            
+
             rg.setState(if (gradient_browser_selected != null) 0 else 1);
             if (rg.button(rl.Rectangle.init(modal_x + modal_width - bottom_btn_width - 10, bottom_y, bottom_btn_width, 30), "Select Gradient")) {
                 if (gradient_browser_selected) |sel_idx| {
                     // Apply gradient to current palette
                     const selected_grad = gradient_library.gradients.items[sel_idx];
-                    
+
                     // Copy 256 colors
                     @memcpy(&f.palette.colors, &selected_grad.colors);
-                    
+
                     // Copy nodes (clamped to MAX_NODES)
                     const num_nodes = @min(selected_grad.nodes.len, colors.MAX_NODES);
                     f.palette.num_nodes = @intCast(num_nodes);
@@ -1574,19 +1785,19 @@ pub fn main() anyerror!void {
                 const menu_width: f32 = 180;
                 const menu_item_height: f32 = 25;
                 const menu_height: f32 = menu_item_height * 4;
-                
+
                 var mx = gradient_context_menu_pos.x;
                 var my = gradient_context_menu_pos.y;
-                
+
                 if (mx + menu_width > @as(f32, @floatFromInt(screenWidth))) mx -= menu_width;
                 if (my + menu_height > @as(f32, @floatFromInt(screenHeight))) my -= menu_height;
-                
+
                 const menu_rect = rl.Rectangle.init(mx, my, menu_width, menu_height);
                 // Background shadow
                 rl.drawRectangleRec(rl.Rectangle.init(mx + 2, my + 2, menu_width, menu_height), rl.Color{ .r = 0, .g = 0, .b = 0, .a = 50 });
                 rl.drawRectangleRec(menu_rect, rl.Color.white);
                 rl.drawRectangleLinesEx(menu_rect, 1, rl.Color.gray);
-                
+
                 var item_y = my;
                 const target_idx = gradient_context_menu_idx;
                 const entry = gradient_library.gradients.items[target_idx];
@@ -1624,7 +1835,7 @@ pub fn main() anyerror!void {
                         var target = &gradient_library.gradients.items[target_idx];
                         const old_name = target.name;
                         const old_nodes = target.nodes;
-                        
+
                         if (allocator.dupe(u8, cp.name)) |new_name| {
                             if (allocator.dupe(colors.ColorNode, cp.nodes)) |new_nodes| {
                                 target.name = new_name;
@@ -1660,6 +1871,16 @@ pub fn main() anyerror!void {
                 if (rl.isMouseButtonPressed(rl.MouseButton.left) and !rl.checkCollisionPointRec(rl.getMousePosition(), menu_rect)) {
                     gradient_context_menu_open = false;
                 }
+            }
+        }
+
+        // --- Modals ---
+        if (img_browser.is_active) {
+            const browser_rect = rl.Rectangle.init(screenWidth / 2.0 - 300, screenHeight / 2.0 - 300, 600, 600);
+            if (img_browser.draw(browser_rect)) |selected_path| {
+                var prng = std.Random.DefaultPrng.init(@as(u64, @intCast(std.time.timestamp())));
+                smoothPaletteFromImage(&f, selected_path, prng.random(), &render_state);
+                history.push(f) catch {};
             }
         }
 

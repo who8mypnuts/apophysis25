@@ -10,37 +10,51 @@ pub const RenderPixel = struct {
     counter: f32, // Changed to f32 for easier GPU texture mapping
 };
 
-// Matches the layout in render.cs
-pub const XformGPU = extern struct {
-    a: f32, b: f32, c: f32, d: f32, e: f32, f: f32,
-    weight: f32,
-    color: f32,
-    linear: f32, sinusoidal: f32, spherical: f32, swirl: f32, horseshoe: f32,
-    polar: f32, handkerchief: f32, heart: f32, disc: f32, spiral: f32,
-    hyperbolic: f32, diamond: f32, ex: f32, julia: f32, bent: f32,
-    padding: f32 = 0.0,
-};
+    // Matches the layout in render.cs
+    // Must be kept in sync with flame.Xform and render.cs struct
+    pub const XformGPU = extern struct {
+        a: f32, b: f32, c: f32, d: f32, e: f32, f: f32,
+        weight: f32,
+        color: f32,
+        linear: f32, sinusoidal: f32, spherical: f32, swirl: f32,
+        horseshoe: f32, polar: f32, handkerchief: f32, heart: f32,
+        disc: f32, spiral: f32, hyperbolic: f32, diamond: f32,
+        ex: f32, julia: f32, bent: f32, waves: f32,
+        fisheye: f32, popcorn: f32, exponential: f32, power: f32,
+        cosine: f32, rings: f32, fan: f32, eyefish: f32,
+        bubble: f32, cylinder: f32, noise: f32, blur: f32,
+        gaussian_blur: f32, radial_blur: f32, pie: f32, ngon: f32,
+        curl: f32, rectangles: f32, tangent: f32, square: f32,
+        rays: f32, blade: f32, secant: f32, twintrian: f32,
+        cross: f32,
+        
+        // New vars
+        julian: f32, julian_power: f32, julian_dist: f32,
+        
+        // Single float padding to align to 52 floats (208 bytes, div 16)
+        padding: f32 = 0.0,
+    };
 
-pub const PointGPU = extern struct {
-    x: f32, y: f32, c: f32,
-    padding: f32 = 0.0,
-};
+    pub const PointGPU = extern struct {
+        x: f32, y: f32, c: f32,
+        padding: f32 = 0.0,
+    };
 
-pub const RenderState = struct {
-    width: i32,
-    height: i32,
-    allocator: std.mem.Allocator,
-    histogram: []RenderPixel, 
-    
-    // Internal state for the chaos game
-    current_point: flame.Point,
-    rng: std.Random.DefaultPrng,
-    
-    gpu_enabled: bool = false,
-    scale: f32 = 100.0,
-    gamma: f32 = 2.2,
-    brightness: f32 = 1.0,
-    vibrancy: f32 = 1.0,
+    pub const RenderState = struct {
+        width: i32,
+        height: i32,
+        allocator: std.mem.Allocator,
+        histogram: []RenderPixel, 
+        
+        // Internal state for the chaos game
+        current_point: flame.Point,
+        rng: std.Random.DefaultPrng,
+        
+        gpu_enabled: bool = false,
+        scale: f32 = 100.0,
+        gamma: f32 = 2.2,
+        brightness: f32 = 1.0,
+        vibrancy: f32 = 1.0,
     
     // Buffer for clearing and syncing
     zero_buffer: []f32,
@@ -292,9 +306,21 @@ pub const RenderState = struct {
                 .a = xf.a, .b = xf.b, .c = xf.c, .d = xf.d, .e = xf.e, .f = xf.f,
                 .weight = xf.weight,
                 .color = xf.color,
-                .linear = xf.linear, .sinusoidal = xf.sinusoidal, .spherical = xf.spherical, .swirl = xf.swirl, .horseshoe = xf.horseshoe,
-                .polar = xf.polar, .handkerchief = xf.handkerchief, .heart = xf.heart, .disc = xf.disc, .spiral = xf.spiral,
-                .hyperbolic = xf.hyperbolic, .diamond = xf.diamond, .ex = xf.ex, .julia = xf.julia, .bent = xf.bent,
+                .linear = xf.linear, .sinusoidal = xf.sinusoidal, .spherical = xf.spherical, .swirl = xf.swirl,
+                .horseshoe = xf.horseshoe, .polar = xf.polar, .handkerchief = xf.handkerchief, .heart = xf.heart,
+                .disc = xf.disc, .spiral = xf.spiral, .hyperbolic = xf.hyperbolic, .diamond = xf.diamond,
+                .ex = xf.ex, .julia = xf.julia, .bent = xf.bent, .waves = xf.waves,
+                .fisheye = xf.fisheye, .popcorn = xf.popcorn, .exponential = xf.exponential, .power = xf.power,
+                .cosine = xf.cosine, .rings = xf.rings, .fan = xf.fan, .eyefish = xf.eyefish,
+                .bubble = xf.bubble, .cylinder = xf.cylinder, .noise = xf.noise, .blur = xf.blur,
+                .gaussian_blur = xf.gaussian_blur, .radial_blur = xf.radial_blur, .pie = xf.pie, .ngon = xf.ngon,
+                .curl = xf.curl, .rectangles = xf.rectangles, .tangent = xf.tangent, .square = xf.square,
+                .rays = xf.rays, .blade = xf.blade, .secant = xf.secant, .twintrian = xf.twintrian,
+                .cross = xf.cross,
+                
+                .julian = xf.julian, 
+                .julian_power = xf.julian_power, 
+                .julian_dist = xf.julian_dist,
             };
         }
 

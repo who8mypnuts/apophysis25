@@ -38,8 +38,42 @@ pub const Xform = struct {
     ex: f32 = 0.0,
     julia: f32 = 0.0,
     bent: f32 = 0.0,
+    waves: f32 = 0.0,
+    fisheye: f32 = 0.0,
+    popcorn: f32 = 0.0,
+    exponential: f32 = 0.0,
+    power: f32 = 0.0,
+    cosine: f32 = 0.0,
+    rings: f32 = 0.0,
+    fan: f32 = 0.0,
+    eyefish: f32 = 0.0,
+    bubble: f32 = 0.0,
+    cylinder: f32 = 0.0,
+    noise: f32 = 0.0,
+    blur: f32 = 0.0,
+    gaussian_blur: f32 = 0.0,
+    radial_blur: f32 = 0.0,
+    pie: f32 = 0.0,
+    ngon: f32 = 0.0,
+    curl: f32 = 0.0,
+    rectangles: f32 = 0.0,
+    tangent: f32 = 0.0,
+    square: f32 = 0.0,
+    rays: f32 = 0.0,
+    blade: f32 = 0.0,
+    secant: f32 = 0.0,
+    twintrian: f32 = 0.0,
+    cross: f32 = 0.0,
+    
+    // New variations and parameters
+    julian: f32 = 0.0,
+    julian_power: f32 = 2.0,
+    julian_dist: f32 = 1.0,
 
-    pub fn apply(self: Xform, p: Point, out: *Point) void {
+    // Padding to match GLSL struct (one float)
+    padding: f32 = 0.0,
+
+    pub fn apply(self: Xform, p: Point, out: *Point, rng_opt: ?std.Random) void {
         // 1. Affine Transform
         const tx = self.a * p.x + self.c * p.y + self.e;
         const ty = self.b * p.x + self.d * p.y + self.f;
@@ -123,6 +157,168 @@ pub const Xform = struct {
            variations.bent(tx, ty, &dx, &dy);
            vx += dx * self.bent; vy += dy * self.bent;
         }
+        if (self.waves != 0) {
+            var dx: f32 = 0; var dy: f32 = 0;
+            variations.waves(tx, ty, &dx, &dy);
+            vx += dx * self.waves; vy += dy * self.waves;
+        }
+        if (self.fisheye != 0) {
+            var dx: f32 = 0; var dy: f32 = 0;
+            variations.fisheye(tx, ty, &dx, &dy);
+            vx += dx * self.fisheye; vy += dy * self.fisheye;
+        }
+        if (self.popcorn != 0) {
+            var dx: f32 = 0; var dy: f32 = 0;
+            variations.popcorn(tx, ty, &dx, &dy);
+            vx += dx * self.popcorn; vy += dy * self.popcorn;
+        }
+        if (self.exponential != 0) {
+            var dx: f32 = 0; var dy: f32 = 0;
+            variations.exponential(tx, ty, &dx, &dy);
+            vx += dx * self.exponential; vy += dy * self.exponential;
+        }
+        if (self.power != 0) {
+            var dx: f32 = 0; var dy: f32 = 0;
+            variations.power(tx, ty, &dx, &dy);
+            vx += dx * self.power; vy += dy * self.power;
+        }
+        if (self.cosine != 0) {
+            var dx: f32 = 0; var dy: f32 = 0;
+            variations.cosine(tx, ty, &dx, &dy);
+            vx += dx * self.cosine; vy += dy * self.cosine;
+        }
+        if (self.rings != 0) {
+            var dx: f32 = 0; var dy: f32 = 0;
+            variations.rings(tx, ty, &dx, &dy, 1.0);
+            vx += dx * self.rings; vy += dy * self.rings;
+        }
+        if (self.fan != 0) {
+            var dx: f32 = 0; var dy: f32 = 0;
+            variations.fan(tx, ty, &dx, &dy, 1.0, 0.0);
+            vx += dx * self.fan; vy += dy * self.fan;
+        }
+        if (self.eyefish != 0) {
+            var dx: f32 = 0; var dy: f32 = 0;
+            variations.eyefish(tx, ty, &dx, &dy);
+            vx += dx * self.eyefish; vy += dy * self.eyefish;
+        }
+        if (self.bubble != 0) {
+            var dx: f32 = 0; var dy: f32 = 0;
+            variations.bubble(tx, ty, &dx, &dy);
+            vx += dx * self.bubble; vy += dy * self.bubble;
+        }
+        if (self.cylinder != 0) {
+            var dx: f32 = 0; var dy: f32 = 0;
+            variations.cylinder(tx, ty, &dx, &dy);
+            vx += dx * self.cylinder; vy += dy * self.cylinder;
+        }
+        if (self.noise != 0) {
+            const r_val = if (rng_opt) |r| r.float(f32) - 0.5 else 0.0;
+            vx += self.noise * tx * r_val;
+            vy += self.noise * ty * r_val; 
+        }
+        if (self.blur != 0) {
+            const ang = if (rng_opt) |r| r.float(f32) * 6.283 else 0.0;
+            const rad = if (rng_opt) |r| r.float(f32) else 0.0;
+            vx += self.blur * rad * @cos(ang);
+            vy += self.blur * rad * @sin(ang);
+        }
+        if (self.gaussian_blur != 0) {
+            const ang = if (rng_opt) |r| r.float(f32) * 6.283 else 0.0;
+            const rad = if (rng_opt) |r| (r.float(f32) + r.float(f32) + r.float(f32) + r.float(f32)) * 0.25 else 0.0;
+            vx += self.gaussian_blur * rad * @cos(ang);
+            vy += self.gaussian_blur * rad * @sin(ang);
+        }
+        if (self.radial_blur != 0) {
+           const r = @sqrt(tx*tx + ty*ty);
+           const theta = std.math.atan2(ty, tx);
+           const ang = theta + (if (rng_opt) |r_rng| r_rng.float(f32) - 0.5 else 0.0) * 0.5;
+           vx += self.radial_blur * r * @cos(ang);
+           vy += self.radial_blur * r * @sin(ang);
+        }
+        if (self.pie != 0) {
+             const slices: f32 = 3.0;
+             const r = @sqrt(tx*tx + ty*ty);
+             const t = @floor((if (rng_opt) |rnd| rnd.float(f32) else 0.5) * slices + 0.5) * 6.283 / slices;
+             vx += self.pie * r * @cos(t);
+             vy += self.pie * r * @sin(t);
+        }
+        if (self.ngon != 0) {
+            const n_count: f32 = 5.0;
+            const period = 6.283 / n_count;
+            const r_val = @sqrt(tx*tx + ty*ty);
+            const theta = std.math.atan2(ty, tx);
+            const phi = theta - period * @floor(theta / period) - period * 0.5;
+            const factor = (@cos(period * 0.5) / @cos(phi));
+            vx += self.ngon * factor * r_val * @cos(theta);
+            vy += self.ngon * factor * r_val * @sin(theta);
+        }
+        if (self.curl != 0) {
+            const c1: f32 = 1.0;
+            const c2: f32 = 1.0;
+            const t1 = 1.0 + c1 * tx + c2 * (tx * tx - ty * ty);
+            const t2 = c1 * ty + 2.0 * c2 * tx * ty;
+            const det = t1 * t1 + t2 * t2;
+            vx += self.curl * (tx * t1 + ty * t2) / det;
+            vy += self.curl * (ty * t1 - tx * t2) / det;
+        }
+        if (self.rectangles != 0) {
+            const x_r = @floor(tx + 0.5);
+            const y_r = @floor(ty + 0.5);
+            vx += self.rectangles * (2.0 * x_r - tx);
+            vy += self.rectangles * (2.0 * y_r - ty);
+        }
+        if (self.square != 0) {
+            const r1 = if (rng_opt) |r| r.float(f32) - 0.5 else 0.0;
+            const r2 = if (rng_opt) |r| r.float(f32) - 0.5 else 0.0;
+            vx += self.square * r1;
+            vy += self.square * r2;
+        }
+        if (self.tangent != 0) {
+            var dx: f32 = 0; var dy: f32 = 0;
+            variations.tangent(tx, ty, &dx, &dy);
+            vx += dx * self.tangent; vy += dy * self.tangent;
+        }
+        if (self.square != 0) {
+            var dx: f32 = 0; var dy: f32 = 0;
+            variations.square(tx, ty, &dx, &dy);
+            vx += dx * self.square; vy += dy * self.square;
+        }
+        if (self.rays != 0) {
+            var dx: f32 = 0; var dy: f32 = 0;
+            variations.rays(tx, ty, &dx, &dy);
+            vx += dx * self.rays; vy += dy * self.rays;
+        }
+        if (self.blade != 0) {
+            var dx: f32 = 0; var dy: f32 = 0;
+            variations.blade(tx, ty, &dx, &dy);
+            vx += dx * self.blade; vy += dy * self.blade;
+        }
+        if (self.secant != 0) {
+            var dx: f32 = 0; var dy: f32 = 0;
+            variations.secant(tx, ty, &dx, &dy);
+            vx += dx * self.secant; vy += dy * self.secant;
+        }
+        if (self.julian != 0) {
+           var dx: f32 = 0; var dy: f32 = 0;
+           // We need RNG for Julian. If not provided, use deterministic (0)
+           var rnd: f32 = 0.0;
+           if (rng_opt) |rng| {
+               rnd = rng.float(f32);
+           }
+           variations.julian(tx, ty, &dx, &dy, self.julian_power, self.julian_dist, rnd);
+           vx += dx * self.julian; vy += dy * self.julian;
+        }
+        if (self.twintrian != 0) {
+            var dx: f32 = 0; var dy: f32 = 0;
+            variations.twintrian(tx, ty, &dx, &dy);
+            vx += dx * self.twintrian; vy += dy * self.twintrian;
+        }
+        if (self.cross != 0) {
+            var dx: f32 = 0; var dy: f32 = 0;
+            variations.crossVariation(tx, ty, &dx, &dy);
+            vx += dx * self.cross; vy += dy * self.cross;
+        }
 
         out.x = vx;
         out.y = vy;
@@ -168,20 +364,35 @@ pub const Flame = struct {
     vibrancy: f32,
 
     pub fn iterate(self: Flame, p: *Point, rng: std.Random) void {
-        // Pick a transform based on weight
-        // For now, assuming equal weights or simplified choice
-        // TODO: Implement proper weighted random choice
         if (self.xforms.len == 0) return;
         
-        const idx = rng.uintLessThan(usize, self.xforms.len);
-        const xf = self.xforms[idx];
-
-        var next_p: Point = undefined;
-        xf.apply(p.*, &next_p);
-
-        // Color update: c = (c + xf.color) / 2
-        next_p.c = (p.c + xf.color) / 2.0;
+        var total_weight: f32 = 0;
+        for (self.xforms) |xf| {
+            total_weight += @abs(xf.weight);
+        }
         
-        p.* = next_p;
+        if (total_weight < 0.0001) {
+            // Fallback to uniform if all weights are zero
+            const idx = rng.uintLessThan(usize, self.xforms.len);
+            const xf = self.xforms[idx];
+            var next_p: Point = undefined;
+            xf.apply(p.*, &next_p, rng);
+            next_p.c = (p.c + xf.color) / 2.0;
+            p.* = next_p;
+            return;
+        }
+
+        const r = rng.float(f32) * total_weight;
+        var cumulative: f32 = 0;
+        for (self.xforms) |xf| {
+            cumulative += @abs(xf.weight);
+            if (r <= cumulative) {
+                var next_p: Point = undefined;
+                xf.apply(p.*, &next_p, rng);
+                next_p.c = (p.c + xf.color) / 2.0;
+                p.* = next_p;
+                return;
+            }
+        }
     }
 };

@@ -21,7 +21,7 @@ pub const Color = struct {
             .b = self.b + other.b,
         };
     }
-    
+
     pub fn lerp(a: Color, b: Color, t: f32) Color {
         return Color{
             .r = a.r + (b.r - a.r) * t,
@@ -44,21 +44,21 @@ pub const Palette = struct {
     num_nodes: u32,
 
     pub fn initDefault() Palette {
-        var p = Palette{ 
+        var p = Palette{
             .colors = undefined,
             .nodes = undefined,
             .num_nodes = 2,
         };
         p.nodes[0] = ColorNode{ .pos = 0.0, .color = Color{ .r = 0, .g = 0, .b = 0 } };
         p.nodes[1] = ColorNode{ .pos = 1.0, .color = Color{ .r = 1, .g = 1, .b = 1 } };
-        
+
         p.bake(null);
         return p;
     }
 
     pub fn bake(self: *Palette, tracked_index: ?*i32) void {
         if (self.num_nodes == 0) return;
-        
+
         // Sort nodes by position (Ensuring selection follows node)
         for (0..self.num_nodes) |i| {
             var min_idx = i;
@@ -85,7 +85,7 @@ pub const Palette = struct {
 
         for (0..256) |i| {
             const t = @as(f32, @floatFromInt(i)) / 255.0;
-            
+
             // Find segment
             var found = false;
             if (t <= self.nodes[0].pos) {
@@ -119,5 +119,52 @@ pub const Palette = struct {
         const c1 = self.colors[i % 256];
         const c2 = self.colors[(i + 1) % 256];
         return Color.lerp(c1, c2, t);
+    }
+
+    pub fn reducePalette(self: *Palette, allocator: std.mem.Allocator, max_nodes: u32) void {
+        // If we already have fewer nodes than the target, do nothing
+        if (self.num_nodes <= max_nodes or self.num_nodes == 0) return;
+
+        // Create a temporary array to store the reduced palette
+        var temp_nodes = std.ArrayListUnmanaged(ColorNode){};
+        defer temp_nodes.deinit(allocator);
+
+        // Always keep the first and last nodes
+        temp_nodes.append(allocator, self.nodes[0]) catch {};
+        for (1..self.num_nodes - 1) |i| {
+            const node = self.nodes[i];
+            var should_keep = false;
+
+            // Keep this node if it's significantly different from neighbors
+            // Check against previous kept node
+            if (temp_nodes.items.len > 0) {
+                const last_kept = temp_nodes.items[temp_nodes.items.len - 1];
+                const diff_r = node.color.r - last_kept.color.r;
+                const diff_g = node.color.g - last_kept.color.g;
+                const diff_b = node.color.b - last_kept.color.b;
+                const color_diff = @sqrt(diff_r * diff_r + diff_g * diff_g + diff_b * diff_b);
+
+                // If the color difference is significant (0.3 in RGB space), keep this node
+                if (color_diff > 0.3) {
+                    should_keep = true;
+                }
+            }
+
+            if (should_keep and temp_nodes.items.len < max_nodes - 1) {
+                temp_nodes.append(allocator, node) catch {};
+            }
+        }
+
+        // Always ensure we have the last node
+        if (temp_nodes.items.len == 0 or temp_nodes.items[temp_nodes.items.len - 1].pos != self.nodes[self.num_nodes - 1].pos) {
+            temp_nodes.append(allocator, self.nodes[self.num_nodes - 1]) catch {};
+        }
+
+        // Copy back to the palette nodes array
+        const final_count = @min(temp_nodes.items.len, max_nodes);
+        for (0..final_count) |i| {
+            self.nodes[i] = temp_nodes.items[i];
+        }
+        self.num_nodes = final_count;
     }
 };
